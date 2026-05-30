@@ -1,0 +1,25 @@
+{{ header }}
+package sift.path_policy
+
+import rego.v1
+
+# Input path validation (security.py:validate_input_path). Block reads from
+# sensitive system dirs, except evidence-data exceptions. input.paths holds the
+# resolved input paths; /dev specifiers for disk-forensics tools are already
+# excluded by the parser (they land in input.device_paths).
+deny contains msg if {
+	some path in input.paths
+	some blocked in data.blocked_input_dirs
+	_inside(path, blocked)
+	not _exception(path)
+	msg := sprintf("input path '%s' is inside blocked system directory '%s'", [path, blocked])
+}
+
+_exception(path) if {
+	some exc in data.blocked_input_exceptions
+	_inside(path, exc)
+}
+
+_inside(path, dir) if path == dir
+
+_inside(path, dir) if startswith(path, sprintf("%s/", [dir]))

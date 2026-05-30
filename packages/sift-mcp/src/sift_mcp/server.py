@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from sift_common.instructions import SIFT_MCP as _INSTRUCTIONS
 
 from sift_mcp.audit import AuditWriter
-from sift_mcp.exceptions import SiftError
+from sift_mcp.exceptions import PolicyDenialError, SiftError
 from sift_mcp.response import build_response
 
 logger = logging.getLogger(__name__)
@@ -302,6 +302,47 @@ def create_server() -> FastMCP:
                     "input_files provided but none resolved to existing files. "
                     "Provenance chain will be incomplete."
                 )
+            return response
+
+        except PolicyDenialError as e:
+            # Structured denial: surface ALL violation reasons + the policies
+            # evaluated so the agent can self-correct (PRD §5.8). Must precede
+            # the SiftError handler since PolicyDenialError subclasses it.
+            elapsed = time.monotonic() - start
+            decision = e.decision
+            response = build_response(
+                tool_name="run_command",
+                success=False,
+                data=None,
+                audit_id=audit_id,
+                error=str(e),
+            )
+            response["error_type"] = "policy_denial"
+            response["policy_decision"] = {
+                "allowed": False,
+                "reasons": decision.get("reasons", []),
+                "policies_evaluated": len(decision.get("policies_evaluated", [])),
+            }
+            response["discipline_reminder"] = (
+                "Policy denials are guardrails, not obstacles. Reformulate your "
+                "command within the allowed constraints."
+            )
+            logged_id = audit.log(
+                tool="run_command",
+                params={"command": command, "purpose": purpose},
+                result_summary={
+                    "error": str(e),
+                    "policy_decision": {
+                        "allowed": False,
+                        "reasons": decision.get("reasons", []),
+                        "policies_evaluated": decision.get("policies_evaluated", []),
+                    },
+                },
+                audit_id=audit_id,
+                elapsed_ms=elapsed * 1000,
+            )
+            if logged_id is None:
+                response["warning"] = "Audit write failed — action not recorded"
             return response
 
         except SiftError as e:

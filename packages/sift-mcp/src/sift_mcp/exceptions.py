@@ -21,5 +21,23 @@ class ExecutionTimeoutError(SiftError):
     """Tool execution timed out."""
 
 
+class PolicyDenialError(SiftError):
+    """Raised when the OPA policy engine denies a command.
+
+    Carries the full structured decision (allowed, reasons, policies_evaluated)
+    so the MCP layer can return ALL violation reasons, not just the first.
+    """
+
+    def __init__(self, message: str, decision: dict):
+        super().__init__(message)
+        self.decision = decision
+
+
+class PolicyEngineError(SiftError):
+    """Raised when OPA evaluation cannot be performed (binary missing, compile
+    failure, eval error). Distinct from PolicyDenialError: this means the engine
+    failed, not that a command was denied."""
+
+
 # Backward compatibility alias
 TimeoutError = ExecutionTimeoutError

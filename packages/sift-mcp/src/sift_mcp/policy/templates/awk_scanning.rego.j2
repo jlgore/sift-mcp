@@ -1,0 +1,15 @@
+{{ header }}
+package sift.awk_scanning
+
+import rego.v1
+
+# awk/gawk/mawk/nawk execute arbitrary commands via language syntax, not flags.
+# Scan positional (non-flag) program text for system(), getline, and pipe/
+# redirect-into-string operators (security.py:_AWK_DANGEROUS_RE).
+deny contains msg if {
+	lower(input.tool) in {lower(t) | some t in data.awk_program_tools}
+	some arg in input.args
+	not startswith(arg, "-")
+	regex.match(`{{ awk_danger_regex }}`, arg)
+	msg := sprintf("dangerous construct in %s program text (system(), getline, or pipe operators)", [input.tool])
+}

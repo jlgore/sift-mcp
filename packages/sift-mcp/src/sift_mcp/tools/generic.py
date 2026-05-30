@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from sift_mcp.catalog import get_tool_def
 from sift_mcp.config import get_config
 from sift_mcp.environment import find_binary
-from sift_mcp.exceptions import DeniedBinaryError, ExecutionError
+from sift_mcp.exceptions import (
+    DeniedBinaryError,
+    ExecutionError,
+    PolicyDenialError,
+    PolicyEngineError,
+)
 from sift_mcp.executor import execute
 from sift_mcp.security import (
     get_output_flags,
@@ -37,6 +44,8 @@ _DEV_PATH_TOOLS = {
     "dd",
 }
 
+logger = logging.getLogger(__name__)
+
 
 def run_command(
     command: list[str],
@@ -64,6 +73,25 @@ def run_command(
     """
     if not command:
         raise ValueError("Empty command")
+
+    # Layer 1: OPA policy evaluation (when enabled). Runs BEFORE security.py so
+    # a denial returns ALL violation reasons at once. security.py still runs
+    # afterwards as belt-and-suspenders on allow. If the engine itself errors
+    # (misconfig, missing binary), fail through to security.py rather than
+    # blocking forensic work — security.py remains a sound enforcement floor.
+    if get_config().policy_engine_enabled:
+        from sift_mcp.policy.evaluator import evaluate_command
+
+        try:
+            decision = evaluate_command(command)
+        except PolicyEngineError as exc:
+            logger.warning("Policy engine unavailable, using security.py only: %s", exc)
+        else:
+            if not decision.get("allowed", False):
+                reasons = decision.get("reasons", [])
+                raise PolicyDenialError(
+                    "Command denied by policy: " + "; ".join(reasons), decision
+                )
 
     binary = command[0].split("/")[-1]  # Strip path prefix
 

@@ -1,0 +1,26 @@
+{{ header }}
+package sift.tool_blocked_flags
+
+import rego.v1
+
+# Per-tool blocked flags (security.yaml: tool_blocked_flags).
+deny contains msg if {
+	blocked := data.tool_blocked_flags[input.tool]
+	some flag in input.flags
+	lower(flag) in {lower(b) | some b in blocked}
+	msg := sprintf("flag '%s' is not permitted on '%s'", [flag, input.tool])
+}
+
+# Global dangerous flags, with per-tool exceptions (security.yaml:
+# dangerous_flags + tool_allowed_flags). Mirrors sanitize_extra_args().
+deny contains msg if {
+	some flag in input.flags
+	lower(flag) in {lower(d) | some d in data.dangerous_flags}
+	not _has_exception(input.tool, flag)
+	msg := sprintf("flag '%s' is globally dangerous", [flag])
+}
+
+_has_exception(tool, flag) if {
+	exceptions := data.tool_allowed_flags[tool]
+	lower(flag) in {lower(e) | some e in exceptions}
+}

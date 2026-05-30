@@ -1,0 +1,24 @@
+{{ header }}
+package sift.decision
+
+import rego.v1
+
+# Aggregate every category's deny set into a single structured decision.
+# Each reason is prefixed with its source package for traceability, matching
+# the OPA decision schema in the PRD (§5.7). allowed is true only when no
+# category produced a deny.
+
+{% for pkg in policy_packages %}
+reasons contains msg if {
+	some r in data.sift.{{ pkg }}.deny
+	msg := sprintf("sift.{{ pkg }}: %s", [r])
+}
+{% endfor %}
+
+default allowed := false
+
+allowed if count(reasons) == 0
+
+policies_evaluated := [
+{% for pkg in policy_packages %}	"sift.{{ pkg }}",
+{% endfor %}]

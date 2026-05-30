@@ -40,11 +40,26 @@ class SiftConfig:
     # SMB share mount point for wintools extraction files
     share_root: str = ""
 
+    # --- Layer 1: OPA policy engine ---
+    # Off by default so the OPA gate is a no-op until explicitly enabled.
+    # security.py enforcement always runs regardless (belt-and-suspenders).
+    policy_engine_enabled: bool = False
+    # Path to the opa binary ("" → resolve from PATH, then repo tools/opa).
+    opa_path: str = ""
+    # Path to security.yaml to compile ("" → catalog default).
+    security_yaml: str = ""
+
     @classmethod
     def from_env(cls) -> SiftConfig:
         cfg = cls()
         cfg.case_dir = resolve_case_dir()
         cfg.share_root = os.environ.get("VHIR_SHARE_ROOT", "")
+
+        cfg.policy_engine_enabled = os.environ.get(
+            "SIFT_POLICY_ENGINE", ""
+        ).lower() in ("1", "true", "yes", "on")
+        cfg.opa_path = os.environ.get("SIFT_OPA_PATH", "")
+        cfg.security_yaml = os.environ.get("SIFT_SECURITY_YAML", "")
 
         extra_paths = os.environ.get("SIFT_TOOL_PATHS", "")
         if extra_paths:
