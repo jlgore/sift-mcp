@@ -41,6 +41,7 @@ def execute(
     cwd: str | None = None,
     save_output: bool = False,
     save_dir: str | None = None,
+    sandbox_prefix: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a command as a subprocess (shell=False).
 
@@ -53,6 +54,9 @@ def execute(
         cwd: Working directory.
         save_output: If True, write stdout/stderr to files with SHA-256 hashes.
         save_dir: Directory for saved output (defaults to cwd/extracted/).
+        sandbox_prefix: If set (Layer 2), the bwrap prefix to prepend before the
+            command for actual execution. cmd_list stays the logical command for
+            output naming, the result envelope, and error messages.
 
     Returns:
         Dict with exit_code, stdout, stderr, elapsed_seconds, and optional saved file info.
@@ -61,11 +65,15 @@ def execute(
     timeout = timeout or config.default_timeout
     max_bytes = config.max_output_bytes
 
+    # The list actually handed to the kernel: bwrap wrapper + command, or the
+    # bare command when no sandbox is in play.
+    run_list = (sandbox_prefix + cmd_list) if sandbox_prefix else cmd_list
+
     start = time.monotonic()
     truncated = False
     try:
         proc = subprocess.Popen(
-            cmd_list,
+            run_list,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,

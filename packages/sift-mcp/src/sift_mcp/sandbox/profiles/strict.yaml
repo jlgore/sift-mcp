@@ -1,0 +1,25 @@
+# Maximum-isolation profile for untrusted cases: minimal filesystem, no /proc,
+# no /opt. Use when the analysis tool set is limited to core /usr binaries.
+name: strict
+description: "Maximum isolation — minimal filesystem, no network, no /proc"
+
+read_only:
+  - /usr/bin
+  - /usr/sbin
+  - /usr/lib
+  - /lib
+  - /lib64
+
+bind_tmp_rw: false   # ephemeral tmpfs /tmp
+
+proc: false
+dev: minimal
+
+unshare:
+  - net
+  - pid
+  - ipc
+  - uts            # isolate hostname
+
+die_with_parent: true
+new_session: true

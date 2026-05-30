@@ -146,13 +146,39 @@ def run_command(
     # Sanitize any args after the binary
     sanitize_extra_args(command[1:], tool_name=binary)
 
+    # Layer 2: wrap the command in a bwrap sandbox (when enabled). Mounts are
+    # derived from the same parsed paths the policy engine uses: input/device
+    # paths -> read-only binds, output paths -> read-write binds.
+    sandbox_prefix = None
+    cfg_sb = get_config()
+    if cfg_sb.sandbox_enabled:
+        from sift_mcp.config import resolve_case_dir
+        from sift_mcp.policy.parser import build_input_doc
+        from sift_mcp.sandbox.bwrap import build_sandbox_prefix, load_profile
+
+        doc = build_input_doc(command)
+        sandbox_prefix = build_sandbox_prefix(
+            input_paths=doc["paths"],
+            output_paths=doc["output_paths"],
+            device_paths=doc["device_paths"],
+            case_dir=resolve_case_dir() or None,
+            profile=load_profile(cfg_sb.sandbox_profile),
+            bwrap_path=cfg_sb.bwrap_path,
+        )
+
     exec_result = execute(
         command,
         timeout=timeout,
         cwd=cwd,
         save_output=save_output,
         save_dir=save_dir,
+        sandbox_prefix=sandbox_prefix,
     )
+    if sandbox_prefix is not None:
+        exec_result["sandboxed"] = True
+        exec_result["sandbox_profile"] = cfg_sb.sandbox_profile
+        # Drop the trailing "--" for a compact record of the bwrap flags used.
+        exec_result["sandbox_args"] = sandbox_prefix[1:-1]
 
     # Parse output based on catalog format when output exceeds byte budget
     cfg = get_config()

@@ -1,0 +1,36 @@
+# Default sandbox profile for forensic tool execution on the SIFT Workstation.
+#
+# Validated on SIFT (Ubuntu 24.04): read-only binding /usr + /opt covers the
+# dotnet runtime (/usr/lib/dotnet, Zimmerman tools in /opt), Volatility 3
+# (/usr/local/bin/vol + /opt/volatility3 venv), and Sleuth Kit. Non-existent
+# paths are skipped at build time, so the same profile is a no-op for missing
+# mounts on a WSL dev box.
+name: default
+description: "Standard forensic analysis — evidence read-only, network isolated"
+
+# Base read-only binds (identity: same path inside and outside the sandbox).
+# Tools live on the host; we expose them read-only rather than rebuilding an image.
+read_only:
+  - /usr
+  - /bin
+  - /sbin
+  - /lib
+  - /lib64
+  - /opt
+
+# Mount a real read-write /tmp (scratch + any /tmp-targeted output). Set false
+# to use an ephemeral tmpfs instead (note: /tmp-targeted tool output would then
+# not persist past the process).
+bind_tmp_rw: true
+
+proc: true       # mount /proc (required by many tools)
+dev: minimal     # --dev /dev: /dev/null,/zero,/urandom,etc. only
+
+# Namespace isolation.
+unshare:
+  - net          # no network — no exfiltration, no DNS
+  - pid          # can't see host processes
+  - ipc          # isolate IPC
+
+die_with_parent: true   # kill the sandboxed tool if the MCP server dies
+new_session: true       # prevent terminal escape via TIOCSTI

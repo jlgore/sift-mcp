@@ -49,6 +49,14 @@ class SiftConfig:
     # Path to security.yaml to compile ("" → catalog default).
     security_yaml: str = ""
 
+    # --- Layer 2: bubblewrap sandbox ---
+    # Off by default; when on, every tool runs inside a bwrap namespace with
+    # evidence read-only and network isolated.
+    sandbox_enabled: bool = False
+    sandbox_profile: str = "default"
+    # Path to the bwrap binary ("" → "bwrap" on PATH).
+    bwrap_path: str = ""
+
     @classmethod
     def from_env(cls) -> SiftConfig:
         cfg = cls()
@@ -60,6 +68,16 @@ class SiftConfig:
         ).lower() in ("1", "true", "yes", "on")
         cfg.opa_path = os.environ.get("SIFT_OPA_PATH", "")
         cfg.security_yaml = os.environ.get("SIFT_SECURITY_YAML", "")
+
+        cfg.sandbox_enabled = os.environ.get("SIFT_SANDBOX", "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if os.environ.get("SIFT_SANDBOX_PROFILE"):
+            cfg.sandbox_profile = os.environ["SIFT_SANDBOX_PROFILE"]
+        cfg.bwrap_path = os.environ.get("SIFT_BWRAP_PATH", "")
 
         extra_paths = os.environ.get("SIFT_TOOL_PATHS", "")
         if extra_paths:

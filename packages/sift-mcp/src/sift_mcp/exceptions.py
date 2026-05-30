@@ -39,5 +39,10 @@ class PolicyEngineError(SiftError):
     failed, not that a command was denied."""
 
 
+class SandboxError(SiftError):
+    """Raised when the bubblewrap sandbox cannot be set up (bwrap missing,
+    profile load failure)."""
+
+
 # Backward compatibility alias
 TimeoutError = ExecutionTimeoutError
