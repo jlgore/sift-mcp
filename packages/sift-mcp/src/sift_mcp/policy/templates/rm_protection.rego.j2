@@ -21,6 +21,17 @@ deny contains msg if {
 	msg := "rm targeting filesystem root"
 }
 
+# Active case directory (security.py:validate_rm_targets checks resolve_case_dir()
+# in addition to the static protected dirs). case_dir is injected at evaluation
+# time, like output_path_policy.
+deny contains msg if {
+	input.tool == "rm"
+	input.case_dir != ""
+	some path in input.paths
+	_inside(path, input.case_dir)
+	msg := sprintf("rm in case directory '%s'. File deletion in case/evidence directories requires human action outside the AI session.", [input.case_dir])
+}
+
 _inside(path, dir) if path == dir
 
 _inside(path, dir) if startswith(path, sprintf("%s/", [dir]))

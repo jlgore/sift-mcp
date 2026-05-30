@@ -45,7 +45,6 @@ class TestRunCommandEnvelope:
         with (
             patch("sift_mcp.tools.generic.find_binary", return_value="/usr/bin/echo"),
             patch("sift_mcp.tools.generic.execute", return_value=mock_result),
-            patch("sift_mcp.tools.generic.sanitize_extra_args", return_value=["hello"]),
         ):
             from sift_mcp.tools.generic import run_command
 

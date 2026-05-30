@@ -8,41 +8,12 @@ from sift_mcp.catalog import get_tool_def
 from sift_mcp.config import get_config
 from sift_mcp.environment import find_binary
 from sift_mcp.exceptions import (
-    DeniedBinaryError,
     ExecutionError,
     PolicyDenialError,
     PolicyEngineError,
 )
 from sift_mcp.executor import execute
-from sift_mcp.security import (
-    get_output_flags,
-    is_denied,
-    sanitize_extra_args,
-    validate_input_path,
-    validate_output_path,
-    validate_rm_targets,
-)
-
-# Tools that legitimately use /dev/ paths as device specifiers
-_DEV_PATH_TOOLS = {
-    "mount",
-    "umount",
-    "mmls",
-    "fls",
-    "icat",
-    "img_stat",
-    "blkid",
-    "fdisk",
-    "losetup",
-    "fsstat",
-    "ifind",
-    "istat",
-    "mmcat",
-    "sigfind",
-    "tsk_recover",
-    "sorter",
-    "dd",
-}
+from sift_mcp.security import validate_command
 
 logger = logging.getLogger(__name__)
 
@@ -93,58 +64,15 @@ def run_command(
                     "Command denied by policy: " + "; ".join(reasons), decision
                 )
 
-    binary = command[0].split("/")[-1]  # Strip path prefix
-
-    # Denylist check — hard block on catastrophic binaries
-    if is_denied(binary):
-        raise DeniedBinaryError(
-            f"Binary '{binary}' is blocked by security policy. "
-            f"This restriction cannot be overridden."
-        )
-
-    # rm-specific: allow execution but protect evidence directories
-    if binary == "rm":
-        validate_rm_targets(command[1:])
-
-    # Validate any arguments that look like file paths
-    output_flags = get_output_flags()
-    prev_was_output_flag = False
-    for arg in command[1:]:
-        # Check flag=value arguments for path values
-        if "=" in arg and arg.startswith("-"):
-            flag_part = arg.split("=", 1)[0]
-            value = arg.split("=", 1)[1]
-            if value and (
-                value.startswith("/") or value.startswith("..") or "/" in value
-            ):
-                if value.startswith("/dev/") and binary in _DEV_PATH_TOOLS:
-                    pass  # Device path for disk forensics
-                elif flag_part in output_flags:
-                    validate_output_path(value)
-                else:
-                    validate_input_path(value)
-            prev_was_output_flag = False
-            continue
-        if arg.startswith("-") and "=" not in arg:
-            prev_was_output_flag = arg in output_flags
-            continue
-        if arg.startswith("/") or arg.startswith("..") or "/" in arg:
-            if arg.startswith("/dev/") and binary in _DEV_PATH_TOOLS:
-                pass  # Device path for disk forensics
-            elif prev_was_output_flag:
-                validate_output_path(arg)
-            else:
-                validate_input_path(arg)
-        prev_was_output_flag = False
+    # security.py validation gauntlet: denylist, rm protection, path
+    # classification, flag/metacharacter/awk sanitization. Raises on violation.
+    binary = validate_command(command)
 
     # Resolve binary via find_binary to prevent absolute path bypass
     resolved = find_binary(binary)
     if not resolved:
         raise ExecutionError(f"Binary '{binary}' not found on this system.")
     command = [resolved] + command[1:]
-
-    # Sanitize any args after the binary
-    sanitize_extra_args(command[1:], tool_name=binary)
 
     # Layer 2: wrap the command in a bwrap sandbox (when enabled). Mounts are
     # derived from the same parsed paths the policy engine uses: input/device

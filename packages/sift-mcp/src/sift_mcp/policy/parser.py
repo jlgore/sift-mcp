@@ -23,32 +23,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sift_mcp.security import get_output_flags
-
-# Tools whose positional args may legitimately be /dev/ device specifiers
-# (disk forensics), where a /dev path must NOT be treated as a blocked input.
-# Mirrors ``_DEV_PATH_TOOLS`` in ``sift_mcp.tools.generic``.
-DEV_PATH_TOOLS = frozenset(
-    {
-        "mount",
-        "umount",
-        "mmls",
-        "fls",
-        "icat",
-        "img_stat",
-        "blkid",
-        "fdisk",
-        "losetup",
-        "fsstat",
-        "ifind",
-        "istat",
-        "mmcat",
-        "sigfind",
-        "tsk_recover",
-        "sorter",
-        "dd",
-    }
-)
+# DEV_PATH_TOOLS: tools whose positional args may legitimately be /dev/ device
+# specifiers (disk forensics), where a /dev path must NOT be treated as a
+# blocked input. Single canonical source lives in sift_mcp.security; re-exported
+# here so callers can `from sift_mcp.policy.parser import DEV_PATH_TOOLS`.
+from sift_mcp.security import DEV_PATH_TOOLS, get_output_flags
 
 
 def _looks_like_path(arg: str) -> bool:
@@ -106,42 +85,49 @@ def build_input_doc(
     output_paths: list[str] = []
     device_paths: list[str] = []
 
+    # Generic path-classification loop — runs for ALL tools (rm included). This
+    # mirrors the path loop in security.validate_command: flag=value and
+    # positional path args are classified as input/output/device.
+    prev_was_output_flag = False
+    for arg in args:
+        # flag=value: validate the value portion as a path
+        if "=" in arg and arg.startswith("-"):
+            flag_part, value = arg.split("=", 1)
+            if value and _looks_like_path(value):
+                if value.startswith("/dev/") and binary in DEV_PATH_TOOLS:
+                    device_paths.append(value)
+                elif flag_part in output_flags:
+                    output_paths.append(_resolve(value))
+                else:
+                    paths.append(_resolve(value))
+            prev_was_output_flag = False
+            continue
+        # bare flag: remember whether it expects an output path next
+        if arg.startswith("-"):
+            prev_was_output_flag = arg in output_flags
+            continue
+        # positional: classify as device / output / input path
+        if _looks_like_path(arg):
+            if arg.startswith("/dev/") and binary in DEV_PATH_TOOLS:
+                device_paths.append(arg)
+            elif prev_was_output_flag:
+                output_paths.append(_resolve(arg))
+            else:
+                paths.append(_resolve(arg))
+        prev_was_output_flag = False
+
     if binary == "rm":
-        # rm: every non-flag arg is a deletion target. In the live pipeline
-        # these pass through both validate_rm_targets AND validate_input_path,
-        # so they belong in ``paths`` (which feeds rm_protection + path_policy).
-        # Unlike the generic case below, no-slash relative targets count too.
+        # rm ALSO validates every non-flag arg as a deletion target
+        # (security.validate_rm_targets), on top of the path loop above. Ensure
+        # all targets — including no-slash relative ones and output-flag-preceded
+        # positionals — are present in ``paths`` for rm_protection.
+        existing = set(paths)
         for arg in args:
             if not arg.startswith("-"):
-                paths.append(_resolve(arg))
-    else:
-        prev_was_output_flag = False
-        for arg in args:
-            # flag=value: validate the value portion as a path
-            if "=" in arg and arg.startswith("-"):
-                flag_part, value = arg.split("=", 1)
-                if value and _looks_like_path(value):
-                    if value.startswith("/dev/") and binary in DEV_PATH_TOOLS:
-                        device_paths.append(value)
-                    elif flag_part in output_flags:
-                        output_paths.append(_resolve(value))
-                    else:
-                        paths.append(_resolve(value))
-                prev_was_output_flag = False
-                continue
-            # bare flag: remember whether it expects an output path next
-            if arg.startswith("-"):
-                prev_was_output_flag = arg in output_flags
-                continue
-            # positional: classify as device / output / input path
-            if _looks_like_path(arg):
-                if arg.startswith("/dev/") and binary in DEV_PATH_TOOLS:
-                    device_paths.append(arg)
-                elif prev_was_output_flag:
-                    output_paths.append(_resolve(arg))
-                else:
-                    paths.append(_resolve(arg))
-            prev_was_output_flag = False
+                rp = _resolve(arg)
+                if rp not in existing:
+                    paths.append(rp)
+                    existing.add(rp)
 
     doc: dict[str, Any] = {
         "tool": binary,

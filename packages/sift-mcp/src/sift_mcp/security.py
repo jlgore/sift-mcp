@@ -8,8 +8,33 @@ from pathlib import Path
 
 from sift_mcp.catalog import load_security_policy
 from sift_mcp.config import resolve_case_dir
+from sift_mcp.exceptions import DeniedBinaryError
 
 _DANGEROUS_PATTERNS = [";", "&&", "||", "`", "$(", "${"]
+
+# Tools that legitimately use /dev/ paths as device specifiers (disk forensics).
+# Canonical home — imported by tools/generic.py and policy/parser.py.
+DEV_PATH_TOOLS = frozenset(
+    {
+        "mount",
+        "umount",
+        "mmls",
+        "fls",
+        "icat",
+        "img_stat",
+        "blkid",
+        "fdisk",
+        "losetup",
+        "fsstat",
+        "ifind",
+        "istat",
+        "mmcat",
+        "sigfind",
+        "tsk_recover",
+        "sorter",
+        "dd",
+    }
+)
 
 
 def _get_policy() -> dict:
@@ -190,6 +215,70 @@ def validate_output_path(path: str) -> str:
         f"Without an active case, output is only allowed in /tmp or "
         f"the current working directory"
     )
+
+
+def validate_command(command: list[str]) -> str:
+    """Run every security check in run_command's order; raise on first violation.
+
+    This is the security.py decision gauntlet — denylist, rm protection, the
+    input/output path-classification loop, and flag/metacharacter/awk
+    sanitization — with no binary resolution and no execution. run_command
+    calls it before find_binary; the parity harness calls it as the oracle.
+
+    Returns the binary basename. Raises DeniedBinaryError or ValueError on a
+    violation.
+    """
+    if not command:
+        raise ValueError("Empty command")
+
+    binary = command[0].split("/")[-1]  # strip path prefix
+
+    # Denylist — hard block on catastrophic binaries.
+    if is_denied(binary):
+        raise DeniedBinaryError(
+            f"Binary '{binary}' is blocked by security policy. "
+            f"This restriction cannot be overridden."
+        )
+
+    # rm — allowed for cleanup but blocked inside evidence/case directories.
+    if binary == "rm":
+        validate_rm_targets(command[1:])
+
+    # Validate any arguments that look like file paths.
+    output_flags = get_output_flags()
+    prev_was_output_flag = False
+    for arg in command[1:]:
+        # flag=value arguments: validate the value portion as a path.
+        if "=" in arg and arg.startswith("-"):
+            flag_part = arg.split("=", 1)[0]
+            value = arg.split("=", 1)[1]
+            if value and (
+                value.startswith("/") or value.startswith("..") or "/" in value
+            ):
+                if value.startswith("/dev/") and binary in DEV_PATH_TOOLS:
+                    pass  # device path for disk forensics
+                elif flag_part in output_flags:
+                    validate_output_path(value)
+                else:
+                    validate_input_path(value)
+            prev_was_output_flag = False
+            continue
+        if arg.startswith("-") and "=" not in arg:
+            prev_was_output_flag = arg in output_flags
+            continue
+        if arg.startswith("/") or arg.startswith("..") or "/" in arg:
+            if arg.startswith("/dev/") and binary in DEV_PATH_TOOLS:
+                pass  # device path for disk forensics
+            elif prev_was_output_flag:
+                validate_output_path(arg)
+            else:
+                validate_input_path(arg)
+        prev_was_output_flag = False
+
+    # Sanitize flags / shell metacharacters / awk program text.
+    sanitize_extra_args(command[1:], tool_name=binary)
+
+    return binary
 
 
 def validate_input_path(path: str) -> str:
