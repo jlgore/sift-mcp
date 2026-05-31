@@ -203,6 +203,26 @@ class AuditWriter:
             pass
         return ""
 
+    def _read_case_dir_id(self) -> str:
+        """Derive case_id from the active VHIR_CASE_DIR.
+
+        Prefers the ``case_id`` field declared in the case's CASE.yaml (the
+        source of truth), falling back to the directory's basename. This is
+        what populates case_id when the case is selected via VHIR_CASE_DIR
+        rather than VHIR_ACTIVE_CASE / ~/.vhir/active_case.
+        """
+        case_dir = os.environ.get("VHIR_CASE_DIR", "").strip()
+        if not case_dir:
+            return ""
+        try:
+            for line in (Path(case_dir) / "CASE.yaml").read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("case_id:"):
+                    return stripped.split(":", 1)[1].strip().strip("\"'")
+        except OSError:
+            pass
+        return Path(case_dir).name
+
     def log(
         self,
         tool: str,
@@ -232,7 +252,8 @@ class AuditWriter:
             "examiner": self.examiner,
             "case_id": case_id
             or os.environ.get("VHIR_ACTIVE_CASE", "")
-            or self._read_active_case_id(),
+            or self._read_active_case_id()
+            or self._read_case_dir_id(),
             "source": source,
             "params": params,
             "result_summary": _summarize(result_summary),

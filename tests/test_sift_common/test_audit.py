@@ -137,6 +137,35 @@ class TestAuditWriter:
         eid = writer.log(tool="t", params={}, result_summary="ok")
         assert eid is None
 
+    def test_case_id_from_case_yaml(self, tmp_path, monkeypatch):
+        """case_id falls back to CASE.yaml's case_id when no explicit id /
+        VHIR_ACTIVE_CASE / active_case pointer is set (the VHIR_CASE_DIR path)."""
+        case_dir = tmp_path / "e2e-test"
+        case_dir.mkdir()
+        (case_dir / "CASE.yaml").write_text("case_id: INC-042\ndescription: x\n")
+        monkeypatch.setenv("VHIR_CASE_DIR", str(case_dir))
+        monkeypatch.setenv("VHIR_EXAMINER", "tester")
+        monkeypatch.delenv("VHIR_ACTIVE_CASE", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "nohome"))  # no active_case file
+        writer = AuditWriter("test-mcp")
+        writer.log(tool="t", params={}, result_summary="ok")
+        entry = json.loads((case_dir / "audit" / "test-mcp.jsonl").read_text().strip())
+        assert entry["case_id"] == "INC-042"
+
+    def test_case_id_from_dir_name_without_yaml_id(self, tmp_path, monkeypatch):
+        """Without a case_id field in CASE.yaml, fall back to the dir basename."""
+        case_dir = tmp_path / "INC-099"
+        case_dir.mkdir()
+        (case_dir / "CASE.yaml").write_text("description: no id here\n")
+        monkeypatch.setenv("VHIR_CASE_DIR", str(case_dir))
+        monkeypatch.setenv("VHIR_EXAMINER", "tester")
+        monkeypatch.delenv("VHIR_ACTIVE_CASE", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "nohome"))
+        writer = AuditWriter("test-mcp")
+        writer.log(tool="t", params={}, result_summary="ok")
+        entry = json.loads((case_dir / "audit" / "test-mcp.jsonl").read_text().strip())
+        assert entry["case_id"] == "INC-099"
+
     def test_elapsed_ms_recorded(self, tmp_path, monkeypatch):
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
