@@ -1,7 +1,7 @@
 # Valhuntir Platform Architecture
 
 **Status:** Definitive reference for what is built. Not aspirational.
-**Last updated:** 2026-04-04
+**Last updated:** 2026-05-31
 
 ---
 
@@ -60,6 +60,30 @@ These are structural facts. If a diagram, README, or plan contradicts any of the
 | **sift-common** | Shared internal package. Canonical AuditWriter, operational logging (oplog), CSV/JSON/text output parsers. Used by all SIFT MCPs. |
 | **case-dashboard** (Examiner Portal) | 8-tab browser review UI mounted at `/portal/` on the gateway. Tabs: overview, findings (with provenance chain), timeline (with ruler), hosts, accounts, evidence verification, IOCs, TODOs. Keyboard shortcuts, search, resizable sidebar, light/dark theme, auto-refresh, challenge-response commit. |
 | **forensic-knowledge** | Shared YAML data package. Tool guidance, artifact knowledge, discipline rules, playbooks, collection checklists. No runtime state. |
+
+---
+
+## Enforcement Layers (sift-mcp tool execution)
+
+sift-mcp's forensic policy (`security.yaml`) is enforced by three additive,
+defense-in-depth layers around tool execution. All are env-gated and ship safe:
+when disabled, behavior is identical to upstream `security.py`-only enforcement.
+Each layer is independent — a command must clear all enabled layers to run.
+
+| Layer | Lives in | Gate | What it does | On violation |
+|-------|----------|------|--------------|--------------|
+| **0 — Harness hooks** | `sift_mcp/hooks/` | `SIFT_POLICY_ENGINE` | Pre-execution hook installed into the agent harness (Claude Code / OpenCode / Pi). Pipes commands from the harness's *native* shell tool — which bypass `run_command` entirely — through the same OPA engine. Closes the bypass gap. | Exit 2, denial reasons on stderr; fails open if engine unavailable |
+| **1 — OPA policy engine** | `sift_mcp/policy/` | `SIFT_POLICY_ENGINE` | `security.yaml` is compiled to Rego (Jinja2 templates) and evaluated by OPA on every `run_command`. Returns a structured decision listing *every* policy that fired. `security.py` still runs alongside (parity-tested). | `PolicyDenialError` with all reasons |
+| **2 — bubblewrap sandbox** | `sift_mcp/sandbox/` | `SIFT_SANDBOX` | Wraps each tool in an unprivileged bwrap namespace: evidence read-only (incl. new-file creation in `evidence/`, with an `evidence/extracted/` RW carve-out), network unshared, host PID/IPC hidden, dies with parent. | Kernel `EROFS` on evidence writes; no network |
+
+**Composition.** Layer 0 stops a denied command before it leaves the harness
+(even via the agent's own bash tool); Layer 1 decides *whether* a command may
+run through `run_command` and returns structured, self-correcting feedback;
+Layer 2 guarantees that *whatever* runs cannot mutate evidence or reach the
+network. Layers 0 and 1 share `SIFT_POLICY_ENGINE` and the same compiled policy,
+so the MCP path and the harness path enforce identically. The Valhuntir CLI
+deploys a comparable Claude Code-specific sandbox/hook externally; these layers
+live *inside* the sift-mcp execution path so they apply to any MCP client.
 
 ---
 

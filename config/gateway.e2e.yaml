@@ -1,0 +1,32 @@
+# SIFT end-to-end test gateway config (Task 2).
+# Both enforcement layers ON via config (no manual SIFT_* exports — proves the
+# Task 1 apply_security_layers wiring). Only the sift-mcp backend is enabled;
+# the other backends' packages aren't installed in the test venv.
+gateway:
+  host: "0.0.0.0"          # WSL's claude connects over the LAN
+  port: 4508
+  log_level: "INFO"
+
+# Layer 1 — OPA policy engine
+policy_engine:
+  enabled: true
+  opa_path: "/home/sansforensics/sift-mcp/tools/opa"   # absolute (not ${VAR})
+  security_yaml: ""        # catalog default
+
+# Layer 2 — bubblewrap kernel sandbox
+sandbox:
+  enabled: true
+  profile: "default"
+  bwrap_path: ""           # blank -> "bwrap" on PATH (/usr/bin/bwrap)
+
+# Auth disabled for the test (single-user mode)
+api_keys: {}
+
+backends:
+  sift-mcp:
+    type: stdio
+    command: "python"
+    args: ["-m", "sift_mcp"]
+    env:
+      VHIR_CASE_DIR: "/cases/e2e-test"
+    enabled: true
