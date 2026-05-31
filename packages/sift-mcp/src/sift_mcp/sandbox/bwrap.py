@@ -109,6 +109,22 @@ def build_sandbox_prefix(
         cd = str(Path(case_dir).resolve())
         cmd += ["--bind", cd, cd]
 
+        # 2b. Keep original evidence immutable even though the case dir is RW.
+        # The case dir is bound RW so tools can write outputs (out/, symbols/,
+        # audit/), but the evidence store must stay read-only at the kernel
+        # level — otherwise an agent (or a compromised tool) could CREATE or
+        # delete files in evidence/, not just modify referenced files.
+        # Order matters (bwrap: later bind wins): RO evidence subdirs first,
+        # then RW carve-outs (e.g. evidence/extracted for derived artifacts).
+        for sub in prof.get("case_readonly_subdirs", []):
+            sp = Path(cd) / sub
+            if sp.exists():
+                cmd += ["--ro-bind", str(sp), str(sp)]
+        for sub in prof.get("case_readwrite_subdirs", []):
+            sp = Path(cd) / sub
+            if sp.exists():
+                cmd += ["--bind", str(sp), str(sp)]
+
     # 3. Evidence/input read-only binds LAST — override any RW parent above.
     for p in _dedupe_existing(input_paths or []):
         cmd += ["--ro-bind", p, p]
@@ -130,6 +146,14 @@ def build_sandbox_prefix(
         cmd.append("--die-with-parent")
     if prof.get("new_session"):
         cmd.append("--new-session")
+
+    # 7. Deterministic environment (additive --setenv; the inherited env is left
+    # otherwise intact). Sorted for stable, testable output. The real-evidence
+    # tool audit found no installed tool *requires* this, so the default profile
+    # uses it only for hygiene (e.g. dotnet telemetry opt-out, a bound TMPDIR);
+    # it's the hook for hardening untrusted-case profiles.
+    for key, val in sorted(prof.get("env", {}).items()):
+        cmd += ["--setenv", str(key), str(val)]
 
     cmd.append("--")
     return cmd

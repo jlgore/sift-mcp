@@ -17,6 +17,20 @@ read_only:
   - /lib
   - /lib64
   - /opt
+  - /etc            # tool config + data: foremost.conf, magic, localtime; bulk_extractor
+                    # SIGSEGVs without it. Read-only, so no host-config tampering risk.
+
+# Case-dir layout: the case directory is bound read-write (for out/, symbols/,
+# audit/), but these subdirs are forced read-only at the kernel level so the
+# original evidence store stays immutable — blocking new-file creation and
+# deletion in evidence/, not just modification of referenced files. The
+# read-write carve-out re-opens a derived-artifacts subdir on top (bwrap's
+# later-bind-wins ordering). Paths are relative to the active case dir;
+# non-existent ones are skipped.
+case_readonly_subdirs:
+  - evidence
+case_readwrite_subdirs:
+  - evidence/extracted
 
 # Mount a real read-write /tmp (scratch + any /tmp-targeted output). Set false
 # to use an ephemeral tmpfs instead (note: /tmp-targeted tool output would then
@@ -34,3 +48,15 @@ unshare:
 
 die_with_parent: true   # kill the sandboxed tool if the MCP server dies
 new_session: true       # prevent terminal escape via TIOCSTI
+
+# Deterministic environment (additive --setenv; inherited env otherwise intact).
+# The real-evidence tool audit found NO installed SIFT tool requires env
+# redirection — the dotnet/Zimmerman suite runs clean with HOME unbound — so
+# this block is hygiene only: keep the host $HOME path out of the namespace and
+# silence dotnet's first-run telemetry/logo probes. It's also the hook for
+# hardening stricter profiles. Add per-tool needs here if a future tool requires.
+env:
+  HOME: /tmp                      # bound RW; don't leak the host home path
+  TMPDIR: /tmp
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"

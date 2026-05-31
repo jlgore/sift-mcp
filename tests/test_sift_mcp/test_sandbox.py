@@ -95,9 +95,71 @@ class TestPrefixConstruction:
         ev_idx = prefix.index(str(ev))
         assert ev_idx > case_idx
 
+    def test_evidence_subdir_ro_bound_blocks_new_files(self, tmp_path):
+        """The evidence subdir is RO-bound as a whole (not just referenced
+        files), so creating a NEW file in evidence/ is blocked even when the
+        case dir is RW-bound. Carve-out: evidence/extracted stays RW.
+        """
+        case_dir = tmp_path / "CASE-001"
+        (case_dir / "evidence" / "extracted").mkdir(parents=True)
+        (case_dir / "out").mkdir()
+
+        prefix = build_sandbox_prefix(
+            case_dir=str(case_dir),
+            profile={
+                "case_readonly_subdirs": ["evidence"],
+                "case_readwrite_subdirs": ["evidence/extracted"],
+            },
+            bwrap_path=_FAKE_BWRAP,
+        )
+        ev_dir = str(case_dir / "evidence")
+        extracted = str(case_dir / "evidence" / "extracted")
+        case_idx = prefix.index(str(case_dir))
+        # evidence/ is RO-bound, after the RW case-dir bind (later wins).
+        assert (ev_dir, ev_dir) in _pairs(prefix, "--ro-bind")
+        assert prefix.index(ev_dir) > case_idx
+        # evidence/extracted is RW-carved AFTER the evidence RO bind (later wins).
+        assert (extracted, extracted) in _pairs(prefix, "--bind")
+        assert prefix.index(extracted) > prefix.index(ev_dir)
+
+    def test_case_readonly_subdirs_skipped_when_absent(self, tmp_path):
+        """A configured RO subdir that doesn't exist is silently skipped."""
+        case_dir = tmp_path / "CASE-001"
+        case_dir.mkdir()
+        prefix = build_sandbox_prefix(
+            case_dir=str(case_dir),
+            profile={"case_readonly_subdirs": ["evidence"]},
+            bwrap_path=_FAKE_BWRAP,
+        )
+        assert str(case_dir / "evidence") not in prefix
+
     def test_network_isolated_by_default_profile(self):
         prefix = build_sandbox_prefix(bwrap_path=_FAKE_BWRAP)
         assert "--unshare-net" in prefix
+
+
+class TestEnvSetenv:
+    def test_profile_env_emits_sorted_setenv(self):
+        prof = {"env": {"TMPDIR": "/tmp", "HOME": "/tmp", "DOTNET_NOLOGO": "1"}}
+        prefix = build_sandbox_prefix(profile=prof, bwrap_path=_FAKE_BWRAP)
+        setenv = _pairs(prefix, "--setenv")
+        # all pairs present, emitted in sorted key order for stable output
+        assert setenv == [("DOTNET_NOLOGO", "1"), ("HOME", "/tmp"), ("TMPDIR", "/tmp")]
+
+    def test_no_env_means_no_setenv(self):
+        # Back-compat: a profile without `env` emits zero --setenv flags.
+        prefix = build_sandbox_prefix(profile={"unshare": ["net"]}, bwrap_path=_FAKE_BWRAP)
+        assert "--setenv" not in prefix
+
+    def test_setenv_values_coerced_to_str(self):
+        prefix = build_sandbox_prefix(
+            profile={"env": {"DOTNET_CLI_TELEMETRY_OPTOUT": 1}}, bwrap_path=_FAKE_BWRAP
+        )
+        assert _pairs(prefix, "--setenv") == [("DOTNET_CLI_TELEMETRY_OPTOUT", "1")]
+
+    def test_default_profile_has_hygiene_env(self):
+        prof = load_profile("default")
+        assert prof["env"]["DOTNET_CLI_TELEMETRY_OPTOUT"] == "1"
 
 
 @_needs_bwrap
