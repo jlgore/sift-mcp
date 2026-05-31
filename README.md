@@ -369,14 +369,24 @@ Additional protections:
 
 ## The "Find Evil!" enforcement layers (policy-as-code + sandbox)
 
-> **Status:** hackathon fork (Find Evil!, SANS). Two additive enforcement
-> layers around `run_command`. Both are env-gated and ship safe — upstream
+> **Status:** hackathon fork (Find Evil!, SANS). Three additive enforcement
+> layers around `run_command`. All are env-gated and ship safe — upstream
 > sift-mcp behavior is unchanged when they're disabled.
 
 sift-mcp historically enforced its forensic policy entirely in Python
 (`security.yaml` defines the rules, `security.py` implements the checks) and
 ran every tool directly on the host via `subprocess.run()` — no kernel
-isolation at all. This fork adds two defense-in-depth layers:
+isolation at all. This fork adds three defense-in-depth layers:
+
+**Layer 0 — harness hooks (close the bypass).** Layers 1 and 2 only protect the
+`run_command` MCP path. But an agent harness (Claude Code, OpenCode, Pi) has its
+*own* native bash/shell tool that runs commands directly, bypassing sift-mcp
+entirely. Layer 0 installs a pre-execution hook in the harness that pipes every
+proposed shell command through the *same* OPA policy engine before it runs —
+denying it (exit 2, with reasons) if policy would. One install command wires it
+up: `python3 -m sift_mcp.hooks.install --harness claude-code`. The gate respects
+the same `SIFT_POLICY_ENGINE` toggle as Layer 1 and fails open if the engine is
+unavailable, so it never blocks forensic work on a misconfigured host.
 
 **Layer 1 — OPA policy engine (policy-as-code).** The same `security.yaml`
 practitioners already edit is compiled to [Rego](https://www.openpolicyagent.org/)
@@ -393,8 +403,10 @@ its parent. Even if a policy bug or a creative flag combination slips past
 Layer 1, the kernel refuses writes to evidence (`EROFS`) and blocks
 exfiltration — the control sift-mcp never had.
 
-Together: Layer 1 decides *whether* a command may run and tells the agent why;
-Layer 2 guarantees that *whatever* runs cannot touch evidence or the network.
+Together: Layer 0 stops a denied command before it leaves the harness (even via
+the agent's native bash tool); Layer 1 decides *whether* a command may run
+through `run_command` and tells the agent why; Layer 2 guarantees that
+*whatever* runs cannot touch evidence or the network.
 
 ### Prerequisites
 
@@ -456,12 +468,30 @@ vars:
 
 | Variable | Layer | Meaning |
 |---|---|---|
-| `SIFT_POLICY_ENGINE` | 1 | `1` to enable OPA evaluation |
+| `SIFT_POLICY_ENGINE` | 0, 1 | `1` to enable OPA evaluation (gates both the harness hook and `run_command`) |
 | `SIFT_OPA_PATH` | 1 | opa binary (blank → PATH, then `./tools/opa`) |
 | `SIFT_SECURITY_YAML` | 1 | security.yaml to compile (blank → catalog default) |
 | `SIFT_SANDBOX` | 2 | `1` to wrap every tool in bwrap |
 | `SIFT_SANDBOX_PROFILE` | 2 | profile name (`default` / `strict`) |
 | `SIFT_BWRAP_PATH` | 2 | bwrap binary (blank → `bwrap` on PATH) |
+
+### Installing the harness hook (Layer 0)
+
+Layers 1 and 2 protect the `run_command` MCP path. To also gate the agent's
+*native* shell tool, install the policy hook into your harness:
+
+```bash
+python3 -m sift_mcp.hooks.install --harness claude-code   # or: opencode | pi
+python3 -m sift_mcp.hooks.install --detect                # auto-detect harness
+python3 -m sift_mcp.hooks.install --all                   # all three
+```
+
+This merges a pre-execution hook into the harness config (e.g. Claude Code's
+`.claude/settings.local.json` `PreToolUse`/`Bash`) that pipes each proposed
+command through `sift_mcp.hooks.gate`. The gate reads the command (stdin JSON,
+`OPENCODE_TOOL_ARGS`, or argv), evaluates it against OPA, and exits `2` with the
+denial reasons on stderr to block it — or `0` to allow. It honors
+`SIFT_POLICY_ENGINE` and fails open on any engine error.
 
 ### Policy compiler CLI
 
