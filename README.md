@@ -367,6 +367,162 @@ Additional protections:
 - Output truncation — large output capped
 - Audit trail — every execution logged with audit ID
 
+## The "Find Evil!" enforcement layers (policy-as-code + sandbox)
+
+> **Status:** hackathon fork (Find Evil!, SANS). Two additive enforcement
+> layers around `run_command`. Both are env-gated and ship safe — upstream
+> sift-mcp behavior is unchanged when they're disabled.
+
+sift-mcp historically enforced its forensic policy entirely in Python
+(`security.yaml` defines the rules, `security.py` implements the checks) and
+ran every tool directly on the host via `subprocess.run()` — no kernel
+isolation at all. This fork adds two defense-in-depth layers:
+
+**Layer 1 — OPA policy engine (policy-as-code).** The same `security.yaml`
+practitioners already edit is compiled to [Rego](https://www.openpolicyagent.org/)
+and evaluated by [OPA](https://www.openpolicyagent.org/) on every
+`run_command`. Instead of an opaque `ValueError`, a denied command returns a
+structured decision envelope listing *every* policy that fired and why, so the
+agent can self-correct. `security.py` still runs alongside OPA
+(belt-and-suspenders), and a parity harness proves the two engines agree.
+
+**Layer 2 — bubblewrap sandbox (kernel isolation).** Every tool runs inside an
+unprivileged [bubblewrap](https://github.com/containers/bubblewrap) namespace:
+evidence mounted read-only, network unshared, host PID/IPC hidden, killed with
+its parent. Even if a policy bug or a creative flag combination slips past
+Layer 1, the kernel refuses writes to evidence (`EROFS`) and blocks
+exfiltration — the control sift-mcp never had.
+
+Together: Layer 1 decides *whether* a command may run and tells the agent why;
+Layer 2 guarantees that *whatever* runs cannot touch evidence or the network.
+
+### Prerequisites
+
+```bash
+# Bubblewrap (Layer 2)
+sudo apt install bubblewrap            # Debian / Ubuntu / SIFT
+
+# OPA (Layer 1) — single static binary
+curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+chmod +x opa && sudo mv opa /usr/local/bin/    # or drop it at ./tools/opa
+```
+
+**Ubuntu 23.10+ / 24.04 — required AppArmor step.** These releases restrict
+unprivileged user namespaces by default
+(`kernel.apparmor_restrict_unprivileged_userns=1`), which is exactly what bwrap
+needs. Without this, every sandboxed `run_command` fails with a userns/clone
+error. Install an AppArmor profile granting `bwrap` the `userns` capability:
+
+```bash
+sudo tee /etc/apparmor.d/bwrap << 'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/bwrap   # or: sudo systemctl reload apparmor
+```
+
+The profile is scoped to `/usr/bin/bwrap` only and persists across reboot. SIFT
+VMs provisioned via `setup-sift.sh` get it installed automatically.
+
+### Enabling the layers (gateway config)
+
+Both layers are wired through `gateway.yaml` — no manual env exports needed.
+The gateway translates two top-level sections into the sift-mcp backend's
+environment when it spawns the subprocess (see `config/gateway.yaml.example`):
+
+```yaml
+policy_engine:
+  enabled: true                 # Layer 1 — ON by default (security.py still runs too)
+  opa_path: "${SIFT_OPA_PATH}"  # blank → resolve from PATH, then ./tools/opa
+  security_yaml: "${SIFT_SECURITY_YAML}"   # blank → catalog default
+
+sandbox:
+  enabled: true                 # Layer 2 — uncomment once bwrap + userns fix are in place
+  profile: "default"            # "default" or "strict" (sift_mcp/sandbox/profiles/)
+  bwrap_path: "${SIFT_BWRAP_PATH}"
+```
+
+Layer 1 ships **enabled** (low-risk — `security.py` remains the source of
+truth). Layer 2 ships **commented out**, because turning the sandbox on without
+bubblewrap + the AppArmor fix makes every `run_command` fail. Uncomment it once
+the prerequisites above are confirmed, then restart the gateway.
+
+If you launch sift-mcp directly (without the gateway), set the equivalent env
+vars:
+
+| Variable | Layer | Meaning |
+|---|---|---|
+| `SIFT_POLICY_ENGINE` | 1 | `1` to enable OPA evaluation |
+| `SIFT_OPA_PATH` | 1 | opa binary (blank → PATH, then `./tools/opa`) |
+| `SIFT_SECURITY_YAML` | 1 | security.yaml to compile (blank → catalog default) |
+| `SIFT_SANDBOX` | 2 | `1` to wrap every tool in bwrap |
+| `SIFT_SANDBOX_PROFILE` | 2 | profile name (`default` / `strict`) |
+| `SIFT_BWRAP_PATH` | 2 | bwrap binary (blank → `bwrap` on PATH) |
+
+### Policy compiler CLI
+
+Compile `security.yaml` → Rego + `data.json` standalone:
+
+```bash
+# Compile to ./compiled/ (default output dir)
+python -m sift_mcp.policy.compiler compile path/to/security.yaml -o compiled/
+```
+
+### Parity: OPA vs security.py
+
+A harness fuzzes commands through both engines and asserts identical
+allow/deny verdicts, so the OPA migration is provably faithful:
+
+```bash
+SIFT_OPA_PATH=./tools/opa python -m sift_mcp.policy.parity --fuzz 3000 --out docs/parity-report.md
+```
+
+> **Result: 3078/3078 cases agree (100.00%) — 0 divergent** (3000 fuzz + 78
+> curated cases). Full report: [`docs/parity-report.md`](docs/parity-report.md).
+
+### The three demo scenarios
+
+With both layers enabled and a case open (evidence bound read-only at
+`/evidence`):
+
+1. **Allow** — a legitimate tool runs sandboxed and returns enriched output:
+
+   ```
+   run_command("vol3 -f /evidence/memory.raw windows.pslist")
+   ```
+
+   OPA allows it; the tool executes inside bwrap with `/evidence` read-only;
+   output comes back enriched; the audit log records the `sandbox_profile` and
+   the exact bwrap flags used.
+
+2. **Policy deny (Layer 1)** — a destructive command is refused, with structure:
+
+   ```
+   run_command("find /evidence -exec rm {} \\;")
+   ```
+
+   Returns a structured denial naming *every* rule that fired (`-exec` blocked
+   on `find`, plus the `;` shell metacharacter), so the agent self-corrects
+   instead of seeing an opaque exception.
+
+3. **Kernel block (Layer 2)** — defense in depth, even if policy had allowed it:
+
+   ```
+   run_command("touch /evidence/proof")
+   ```
+
+   The bwrap read-only bind makes the kernel reject the write with `EROFS` —
+   evidence cannot be modified regardless of what the policy layer decided. This
+   protection holds regardless of LLM client, prompt engineering, or policy
+   bugs: it's the namespace, not the application.
+
+Each step is captured in the audit JSONL (policy decision + sandbox flags) —
+the PRD §10 "Agent Execution Logs" deliverable.
+
 ## Forensic Catalog (Enrichment)
 
 Tools listed in YAML catalog files get enriched responses with forensic-knowledge data (caveats, corroboration suggestions, field meanings, discipline reminders). Uncataloged tools execute with basic response envelopes (audit_id, audit, discipline reminder).
