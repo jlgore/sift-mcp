@@ -7,6 +7,33 @@ gateway:
   port: 4508
   log_level: "INFO"
 
+# --- sift-mcp enforcement layers (PRD §7) ---
+# These two sections are translated by the gateway into SIFT_* environment
+# variables on the sift-mcp backend when it is spawned (see
+# sift_gateway.config.apply_security_layers). You do NOT need to export any
+# env vars by hand — edit the values here and restart the gateway.
+
+# Layer 1 — OPA policy engine. Compiles security.yaml → Rego and evaluates
+# every run_command through OPA. security.py enforcement always runs too
+# (belt-and-suspenders), so enabling this is low-risk. ON by default.
+policy_engine:
+  enabled: true
+  # Path to the opa binary. Leave blank to resolve from PATH, then ./tools/opa.
+  opa_path: "${SIFT_OPA_PATH}"
+  # Path to a security.yaml to compile. Leave blank for the catalog default.
+  security_yaml: "${SIFT_SECURITY_YAML}"
+
+# Layer 2 — bubblewrap kernel sandbox. Every tool runs inside a bwrap
+# namespace with evidence read-only and the network isolated. Requires
+# bubblewrap installed AND (on Ubuntu 24.04) the unprivileged-userns AppArmor
+# profile for bwrap — see README "Sandbox prerequisites". Enabling it without
+# those in place makes EVERY run_command fail, so it ships commented out.
+# Uncomment once bwrap + the userns fix are confirmed on this host:
+# sandbox:
+#   enabled: true
+#   profile: "default"            # profile name under sift_mcp/sandbox/profiles/
+#   bwrap_path: "${SIFT_BWRAP_PATH}"  # blank → "bwrap" on PATH
+
 # API key authentication
 # Each key maps to an examiner identity and role.
 # If this section is empty or missing, auth is disabled (single-user mode).
