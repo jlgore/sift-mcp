@@ -276,7 +276,7 @@ graph LR
 
 | Tool | Description |
 |------|-------------|
-| `list_available_tools` | List cataloged tools (enriched) with availability status — uncataloged tools can also execute |
+| `list_available_tools` | List cataloged (FK-enriched) tools with availability; pass `include_uncataloged=true` to also list the full set of SIFT-installed commands runnable via `run_command` (sourced from the install manifest; `live_network` tools excluded unless `include_live_network=true`) |
 | `get_tool_help` | Usage info, flags, caveats, and FK knowledge for a tool |
 | `check_tools` | Check which tools are installed and available |
 | `suggest_tools` | Given an artifact type, suggest relevant tools with corroboration guidance |

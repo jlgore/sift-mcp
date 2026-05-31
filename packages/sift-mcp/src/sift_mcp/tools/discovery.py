@@ -10,6 +10,7 @@ from forensic_knowledge import loader
 
 from sift_mcp.catalog import get_tool_def, list_tools_in_catalog
 from sift_mcp.environment import find_binary
+from sift_mcp.manifest import load_manifest
 from sift_mcp.response import DISCIPLINE_REMINDERS
 
 # Alias mapping — common artifact names to FK artifact YAML names
@@ -67,21 +68,71 @@ def _wintools_available() -> bool:
         return False
 
 
-def list_available_tools(category: str | None = None) -> list[dict]:
-    """List cataloged tools with availability and FK enrichment status.
+def list_available_tools(
+    category: str | None = None,
+    include_uncataloged: bool = False,
+    include_live_network: bool = False,
+) -> list[dict]:
+    """List forensic tools available on this SIFT workstation.
 
-    Note: tools not in the catalog can also be executed via run_command.
-    Cataloged tools get enriched responses (caveats, corroboration, field meanings).
+    By default returns the curated catalog: tools with FK enrichment (caveats,
+    corroboration, field meanings) wired into run_command responses.
+
+    With ``include_uncataloged=True`` it also returns the broader set of forensic
+    commands SIFT installs (from the install manifest) — runnable via run_command
+    but without FK enrichment (``enriched: false``). live_network tools (hydra,
+    nikto, aircrack-ng…) are excluded unless ``include_live_network=True``,
+    because the execution sandbox runs with the network unshared.
+
+    Every entry carries: name, command, category, available, enriched,
+    analysis_scope, and fk_tool (None when unenriched).
     """
-    tools = list_tools_in_catalog(category=category)
-    results = []
-    for t in tools:
+    # scope lookup from the manifest, keyed by command (case-insensitive)
+    scope_by_cmd = {m["command"].lower(): m["analysis_scope"] for m in load_manifest()}
+
+    results: list[dict] = []
+    catalog_cmds: set[str] = set()
+    for t in list_tools_in_catalog(category=category):
         td = get_tool_def(t["name"])
-        available = find_binary(td.binary) is not None if td else False
-        entry = {**t, "available": available, "enriched": True}
-        if td and available:
-            entry["binary_path"] = find_binary(td.binary)
+        binary = td.binary if td else t["name"]
+        catalog_cmds.add(binary.lower())
+        path = find_binary(binary) if td else None
+        entry = {
+            **t,
+            "command": binary,
+            "available": path is not None,
+            "enriched": True,
+            "analysis_scope": scope_by_cmd.get(binary.lower(), "offline"),
+            "fk_tool": (td.fk_tool_name or td.binary) if td else None,
+        }
+        if path:
+            entry["binary_path"] = path
         results.append(entry)
+
+    if not include_uncataloged:
+        return results
+
+    for m in load_manifest():
+        cmd = m["command"]
+        if cmd.lower() in catalog_cmds:
+            continue  # already covered by the (enriched) catalog entry
+        if category and category not in (m["source_category"], m["install_source"]):
+            continue
+        if m["analysis_scope"] == "live_network" and not include_live_network:
+            continue
+        results.append(
+            {
+                "name": cmd,
+                "command": cmd,
+                "category": "uncataloged",
+                "package": m["package"],
+                "install_source": m["install_source"],
+                "available": find_binary(cmd) is not None,
+                "enriched": False,
+                "analysis_scope": m["analysis_scope"],
+                "fk_tool": None,
+            }
+        )
     return results
 
 

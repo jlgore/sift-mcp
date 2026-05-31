@@ -67,12 +67,32 @@ def create_server() -> FastMCP:
     # --- Discovery ---
 
     @server.tool()
-    def list_available_tools(category: str = "") -> dict:
-        """List forensic tools available on this SIFT workstation, with availability status."""
+    def list_available_tools(
+        category: str = "",
+        include_uncataloged: bool = False,
+        include_live_network: bool = False,
+    ) -> dict:
+        """List forensic tools available on this SIFT workstation, with availability status.
+
+        Defaults to the curated, FK-enriched catalog. Set include_uncataloged=True
+        to also list the broader set of SIFT-installed commands runnable via
+        run_command (without FK enrichment); live_network tools are excluded
+        unless include_live_network=True (the sandbox runs with no network).
+        """
         from sift_mcp.tools.discovery import list_available_tools as _list
 
-        tools = _list(category=category or None)
-        return {"tools": tools, "count": len(tools)}
+        tools = _list(
+            category=category or None,
+            include_uncataloged=include_uncataloged,
+            include_live_network=include_live_network,
+        )
+        enriched = sum(1 for t in tools if t.get("enriched"))
+        return {
+            "tools": tools,
+            "count": len(tools),
+            "enriched_count": enriched,
+            "uncataloged_count": len(tools) - enriched,
+        }
 
     @server.tool()
     def get_tool_help(tool_name: str) -> dict:

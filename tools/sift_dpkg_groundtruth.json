@@ -1,0 +1,687 @@
+{
+  "sleuthkit": {
+    "installed": true,
+    "binaries": [
+      "blkcalc",
+      "blkcat",
+      "blkls",
+      "blkstat",
+      "fcat",
+      "ffind",
+      "fiwalk",
+      "fls",
+      "fsstat",
+      "hfind",
+      "icat",
+      "ifind",
+      "ils",
+      "img_cat",
+      "img_stat",
+      "istat",
+      "jcat",
+      "jls",
+      "jpeg_extract",
+      "mactime",
+      "mmcat",
+      "mmls",
+      "mmstat",
+      "pstat",
+      "sigfind",
+      "sorter",
+      "srch_strings",
+      "tsk_comparedir",
+      "tsk_gettimes",
+      "tsk_imageinfo",
+      "tsk_loaddb",
+      "tsk_recover",
+      "usnjls"
+    ]
+  },
+  "ewf-tools": {
+    "installed": false,
+    "binaries": []
+  },
+  "libewf-tools": {
+    "installed": true,
+    "binaries": [
+      "ewfacquire",
+      "ewfacquirestream",
+      "ewfdebug",
+      "ewfexport",
+      "ewfinfo",
+      "ewfmount",
+      "ewfrecover",
+      "ewfverify"
+    ]
+  },
+  "plaso-tools": {
+    "installed": true,
+    "binaries": [
+      "image_export.py",
+      "log2timeline.py",
+      "pinfo.py",
+      "psort.py",
+      "psteal.py"
+    ]
+  },
+  "libesedb-tools": {
+    "installed": true,
+    "binaries": [
+      "esedbexport",
+      "esedbinfo"
+    ]
+  },
+  "libregf-tools": {
+    "installed": true,
+    "binaries": [
+      "regfexport",
+      "regfinfo",
+      "regfmount"
+    ]
+  },
+  "libevtx-tools": {
+    "installed": true,
+    "binaries": [
+      "evtxexport",
+      "evtxinfo"
+    ]
+  },
+  "libevt-tools": {
+    "installed": true,
+    "binaries": [
+      "evtexport",
+      "evtinfo"
+    ]
+  },
+  "libvshadow-tools": {
+    "installed": true,
+    "binaries": [
+      "vshadowdebug",
+      "vshadowinfo",
+      "vshadowmount"
+    ]
+  },
+  "libbde-tools": {
+    "installed": true,
+    "binaries": [
+      "bdeinfo",
+      "bdemount"
+    ]
+  },
+  "libfvde-tools": {
+    "installed": true,
+    "binaries": [
+      "fvdeinfo",
+      "fvdemount",
+      "fvdewipekey"
+    ]
+  },
+  "libfsapfs-tools": {
+    "installed": true,
+    "binaries": [
+      "fsapfsinfo",
+      "fsapfsmount"
+    ]
+  },
+  "pff-tools": {
+    "installed": true,
+    "binaries": [
+      "pffexport",
+      "pffinfo"
+    ]
+  },
+  "libmsiecf": {
+    "installed": true,
+    "binaries": []
+  },
+  "libolecf": {
+    "installed": true,
+    "binaries": []
+  },
+  "libplist-utils": {
+    "installed": true,
+    "binaries": [
+      "plistutil"
+    ]
+  },
+  "libvmdk": {
+    "installed": true,
+    "binaries": []
+  },
+  "libvhdi": {
+    "installed": true,
+    "binaries": []
+  },
+  "bulk-extractor": {
+    "installed": true,
+    "binaries": [
+      "bulk_extractor",
+      "plugin_test"
+    ]
+  },
+  "foremost": {
+    "installed": true,
+    "binaries": [
+      "foremost"
+    ]
+  },
+  "scalpel": {
+    "installed": true,
+    "binaries": [
+      "scalpel"
+    ]
+  },
+  "testdisk": {
+    "installed": true,
+    "binaries": [
+      "fidentify",
+      "photorec",
+      "testdisk"
+    ]
+  },
+  "hashdeep": {
+    "installed": true,
+    "binaries": [
+      "hashdeep",
+      "md5deep",
+      "sha1deep",
+      "sha256deep",
+      "tigerdeep",
+      "whirlpooldeep"
+    ]
+  },
+  "ssdeep": {
+    "installed": true,
+    "binaries": [
+      "ssdeep"
+    ]
+  },
+  "dc3dd": {
+    "installed": true,
+    "binaries": [
+      "dc3dd"
+    ]
+  },
+  "dcfldd": {
+    "installed": true,
+    "binaries": [
+      "dcfldd"
+    ]
+  },
+  "gddrescue": {
+    "installed": true,
+    "binaries": [
+      "ddrescue",
+      "ddrescuelog"
+    ]
+  },
+  "exfat-fuse": {
+    "installed": true,
+    "binaries": [
+      "mount.exfat-fuse"
+    ]
+  },
+  "afflib-tools": {
+    "installed": true,
+    "binaries": [
+      "affcat",
+      "affcompare",
+      "affconvert",
+      "affcopy",
+      "affcrypto",
+      "affdiskprint",
+      "affinfo",
+      "affix",
+      "affrecover",
+      "affsegment",
+      "affsign",
+      "affstats",
+      "affuse",
+      "affverify",
+      "affxml"
+    ]
+  },
+  "libguestfs-tools": {
+    "installed": false,
+    "binaries": []
+  },
+  "xmount": {
+    "installed": true,
+    "binaries": [
+      "xmount"
+    ]
+  },
+  "qemu-utils": {
+    "installed": true,
+    "binaries": [
+      "qemu-img",
+      "qemu-io",
+      "qemu-nbd",
+      "qemu-storage-daemon"
+    ]
+  },
+  "samdump2": {
+    "installed": true,
+    "binaries": [
+      "samdump2"
+    ]
+  },
+  "ophcrack-cli": {
+    "installed": true,
+    "binaries": [
+      "ophcrack-cli"
+    ]
+  },
+  "aeskeyfind": {
+    "installed": true,
+    "binaries": [
+      "aeskeyfind"
+    ]
+  },
+  "disktype": {
+    "installed": true,
+    "binaries": [
+      "disktype"
+    ]
+  },
+  "pst-utils": {
+    "installed": true,
+    "binaries": [
+      "lspst",
+      "nick2ldif",
+      "pst2dii",
+      "pst2ldif",
+      "readpst"
+    ]
+  },
+  "python3-pefile": {
+    "installed": true,
+    "binaries": []
+  },
+  "pev": {
+    "installed": true,
+    "binaries": []
+  },
+  "radare2": {
+    "installed": true,
+    "binaries": [
+      "r2",
+      "r2agent",
+      "r2p",
+      "r2pm",
+      "r2r",
+      "rabin2",
+      "radare2",
+      "radiff2",
+      "rafind2",
+      "ragg2",
+      "rahash2",
+      "rarun2",
+      "rasign2",
+      "rasm2",
+      "ravc2",
+      "rax2"
+    ]
+  },
+  "upx-ucl": {
+    "installed": true,
+    "binaries": [
+      "upx-ucl"
+    ]
+  },
+  "outguess": {
+    "installed": true,
+    "binaries": [
+      "histogram",
+      "outguess",
+      "outguess-extract",
+      "seek_script"
+    ]
+  },
+  "tcpflow": {
+    "installed": true,
+    "binaries": [
+      "tcpflow"
+    ]
+  },
+  "tcptrace": {
+    "installed": true,
+    "binaries": [
+      "tcptrace",
+      "xpl2gpl"
+    ]
+  },
+  "ngrep": {
+    "installed": true,
+    "binaries": [
+      "ngrep"
+    ]
+  },
+  "nfdump": {
+    "installed": true,
+    "binaries": [
+      "nfanon",
+      "nfcapd",
+      "nfdump",
+      "nfexpire",
+      "nfpcapd",
+      "nfprofile",
+      "nfreplay",
+      "nftrack"
+    ]
+  },
+  "tcpxtract": {
+    "installed": true,
+    "binaries": [
+      "tcpxtract"
+    ]
+  },
+  "tcpstat": {
+    "installed": true,
+    "binaries": [
+      "tcpprof",
+      "tcpstat"
+    ]
+  },
+  "tcpick": {
+    "installed": true,
+    "binaries": [
+      "tcpick"
+    ]
+  },
+  "p0f": {
+    "installed": true,
+    "binaries": [
+      "p0f"
+    ]
+  },
+  "ntfs-3g": {
+    "installed": true,
+    "binaries": [
+      "lowntfs-3g",
+      "mkfs.ntfs",
+      "mkntfs",
+      "mount.lowntfs-3g",
+      "mount.ntfs",
+      "mount.ntfs-3g",
+      "ntfs-3g",
+      "ntfs-3g.probe",
+      "ntfscat",
+      "ntfsclone",
+      "ntfscluster",
+      "ntfscmp",
+      "ntfscp",
+      "ntfsdecrypt",
+      "ntfsfallocate",
+      "ntfsfix",
+      "ntfsinfo",
+      "ntfslabel",
+      "ntfsls",
+      "ntfsmove",
+      "ntfsrecover",
+      "ntfsresize",
+      "ntfssecaudit",
+      "ntfstruncate",
+      "ntfsundelete",
+      "ntfsusermap",
+      "ntfswipe"
+    ]
+  },
+  "extundelete": {
+    "installed": true,
+    "binaries": [
+      "extundelete"
+    ]
+  },
+  "safecopy": {
+    "installed": true,
+    "binaries": [
+      "safecopy"
+    ]
+  },
+  "vmfs-tools": {
+    "installed": true,
+    "binaries": [
+      "debugvmfs",
+      "fsck.vmfs",
+      "vmfs-fuse",
+      "vmfs-lvm"
+    ]
+  },
+  "cabextract": {
+    "installed": true,
+    "binaries": [
+      "cabextract"
+    ]
+  },
+  "exif": {
+    "installed": true,
+    "binaries": [
+      "exif"
+    ]
+  },
+  "dos2unix": {
+    "installed": false,
+    "binaries": []
+  },
+  "tofrodos": {
+    "installed": true,
+    "binaries": [
+      "fromdos",
+      "todos"
+    ]
+  },
+  "jq": {
+    "installed": true,
+    "binaries": [
+      "jq"
+    ]
+  },
+  "file": {
+    "installed": true,
+    "binaries": [
+      "file"
+    ]
+  },
+  "vim": {
+    "installed": true,
+    "binaries": [
+      "vim.basic"
+    ]
+  },
+  "hexedit": {
+    "installed": true,
+    "binaries": [
+      "hexedit"
+    ]
+  },
+  "vbindiff": {
+    "installed": true,
+    "binaries": [
+      "vbindiff"
+    ]
+  },
+  "ent": {
+    "installed": true,
+    "binaries": [
+      "ent"
+    ]
+  },
+  "grepcidr": {
+    "installed": true,
+    "binaries": [
+      "grepcidr"
+    ]
+  },
+  "fdupes": {
+    "installed": true,
+    "binaries": [
+      "fdupes"
+    ]
+  },
+  "silversearcher-ag": {
+    "installed": true,
+    "binaries": [
+      "ag"
+    ]
+  },
+  "ugrep": {
+    "installed": false,
+    "binaries": []
+  },
+  "p7zip-full": {
+    "installed": true,
+    "binaries": []
+  },
+  "unrar-free": {
+    "installed": true,
+    "binaries": [
+      "unrar-free"
+    ]
+  },
+  "rar": {
+    "installed": false,
+    "binaries": []
+  },
+  "cryptsetup": {
+    "installed": true,
+    "binaries": [
+      "cryptdisks_start",
+      "cryptdisks_stop",
+      "luksformat"
+    ]
+  },
+  "dislocker": {
+    "installed": true,
+    "binaries": [
+      "dislocker",
+      "dislocker-bek",
+      "dislocker-file",
+      "dislocker-find",
+      "dislocker-fuse",
+      "dislocker-metadata"
+    ]
+  },
+  "mtd-utils": {
+    "installed": true,
+    "binaries": [
+      "doc_loadbios",
+      "docfdisk",
+      "fectest",
+      "flash_erase",
+      "flash_eraseall",
+      "flash_lock",
+      "flash_otp_dump",
+      "flash_otp_erase",
+      "flash_otp_info",
+      "flash_otp_lock",
+      "flash_otp_write",
+      "flash_unlock",
+      "flashcp",
+      "ftl_check",
+      "ftl_format",
+      "jffs2dump",
+      "jffs2reader",
+      "lsmtd",
+      "mkfs.jffs2",
+      "mkfs.ubifs",
+      "mount.ubifs",
+      "mtd_debug",
+      "mtdinfo",
+      "mtdpart",
+      "nanddump",
+      "nandflipbits",
+      "nandtest",
+      "nandwrite",
+      "nftl_format",
+      "nftldump",
+      "recv_image",
+      "rfddump",
+      "rfdformat",
+      "serve_image",
+      "sumtool",
+      "ubiattach",
+      "ubiblock",
+      "ubicrc32",
+      "ubidetach",
+      "ubiformat",
+      "ubihealthd",
+      "ubimkvol",
+      "ubinfo",
+      "ubinize",
+      "ubirename",
+      "ubirmvol",
+      "ubirsvol",
+      "ubiscan",
+      "ubiupdatevol"
+    ]
+  },
+  "squashfs-tools": {
+    "installed": true,
+    "binaries": [
+      "mksquashfs",
+      "sqfscat",
+      "sqfstar",
+      "unsquashfs"
+    ]
+  },
+  "kpartx": {
+    "installed": true,
+    "binaries": [
+      "kpartx"
+    ]
+  },
+  "net-tools": {
+    "installed": true,
+    "binaries": [
+      "arp",
+      "ifconfig",
+      "ipmaddr",
+      "iptunnel",
+      "mii-tool",
+      "nameif",
+      "netstat",
+      "plipconfig",
+      "rarp",
+      "route",
+      "slattach"
+    ]
+  },
+  "netcat-openbsd": {
+    "installed": true,
+    "binaries": [
+      "nc.openbsd"
+    ]
+  },
+  "binwalk": {
+    "installed": false,
+    "binaries": []
+  },
+  "yara": {
+    "installed": false,
+    "binaries": []
+  },
+  "python3-yara": {
+    "installed": true,
+    "binaries": []
+  },
+  "libyara3": {
+    "installed": false,
+    "binaries": []
+  },
+  "nbtscan": {
+    "installed": true,
+    "binaries": [
+      "nbtscan"
+    ]
+  },
+  "arp-scan": {
+    "installed": true,
+    "binaries": [
+      "arp-fingerprint",
+      "arp-scan",
+      "get-iab",
+      "get-oui"
+    ]
+  }
+}
