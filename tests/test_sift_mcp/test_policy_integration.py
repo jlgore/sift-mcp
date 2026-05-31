@@ -75,6 +75,45 @@ class TestPolicyGateEnabled:
         # Every category is reported as evaluated, not just the one that fired.
         assert len(exc.value.decision["policies_evaluated"]) >= 7
 
+    def test_allow_attaches_policy_decision(self, engine_on):
+        """On allow, the OPA verdict rides the result envelope so the audit can
+        record the decision alongside the sandbox flags (symmetric with deny)."""
+        mock_result = {
+            "exit_code": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "elapsed_seconds": 0.1,
+            "command": ["echo", "hi"],
+            "stdout_total_bytes": 2,
+        }
+        with (
+            patch("sift_mcp.tools.generic.find_binary", return_value="/usr/bin/echo"),
+            patch("sift_mcp.tools.generic.execute", return_value=mock_result),
+        ):
+            out = run_command(["echo", "hi"])
+        assert out["policy_decision"]["allowed"] is True
+        assert out["policy_decision"]["reasons"] == []
+        assert len(out["policy_decision"]["policies_evaluated"]) >= 7
+
+
+class TestPolicyDecisionAbsentWhenDisabled:
+    def test_no_policy_decision_when_engine_off(self):
+        """Engine off → no OPA verdict attached (security.py path is silent)."""
+        mock_result = {
+            "exit_code": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "elapsed_seconds": 0.1,
+            "command": ["echo", "hi"],
+            "stdout_total_bytes": 2,
+        }
+        with (
+            patch("sift_mcp.tools.generic.find_binary", return_value="/usr/bin/echo"),
+            patch("sift_mcp.tools.generic.execute", return_value=mock_result),
+        ):
+            out = run_command(["echo", "hi"])
+        assert "policy_decision" not in out
+
 
 class TestPolicyGateDisabled:
     """With the engine off (default), security.py is the only enforcement."""

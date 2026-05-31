@@ -50,6 +50,7 @@ def run_command(
     # afterwards as belt-and-suspenders on allow. If the engine itself errors
     # (misconfig, missing binary), fail through to security.py rather than
     # blocking forensic work — security.py remains a sound enforcement floor.
+    decision = None
     if get_config().policy_engine_enabled:
         from sift_mcp.policy.evaluator import evaluate_command
 
@@ -107,6 +108,17 @@ def run_command(
         exec_result["sandbox_profile"] = cfg_sb.sandbox_profile
         # Drop the trailing "--" for a compact record of the bwrap flags used.
         exec_result["sandbox_args"] = sandbox_prefix[1:-1]
+
+    # Record the OPA allow verdict so the audit/response show the policy
+    # decision alongside the sandbox flags — symmetric with the denial path,
+    # which carries its decision via PolicyDenialError. (decision is set only
+    # when the engine ran and allowed; a deny would have raised above.)
+    if decision is not None:
+        exec_result["policy_decision"] = {
+            "allowed": decision.get("allowed", True),
+            "reasons": decision.get("reasons", []),
+            "policies_evaluated": decision.get("policies_evaluated", []),
+        }
 
     # Parse output based on catalog format when output exceeds byte budget
     cfg = get_config()

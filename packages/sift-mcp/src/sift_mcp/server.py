@@ -251,19 +251,36 @@ def create_server() -> FastMCP:
                 response["full_output_sha256"] = exec_result.get("output_sha256")
                 response["full_output_bytes"] = exec_result.get("stdout_total_bytes")
 
+            # Surface the OPA allow verdict on the envelope (compact: count of
+            # policies evaluated), mirroring the denial path's policy_decision.
+            policy_decision = exec_result.get("policy_decision")
+            if policy_decision:
+                response["policy_decision"] = {
+                    "allowed": policy_decision.get("allowed", True),
+                    "reasons": policy_decision.get("reasons", []),
+                    "policies_evaluated": len(
+                        policy_decision.get("policies_evaluated", [])
+                    ),
+                }
+
+            result_summary = {
+                "exit_code": exec_result["exit_code"],
+                "output_file": exec_result.get("output_file", ""),
+                "output_sha256": exec_result.get("output_sha256", ""),
+                "stdout_bytes": exec_result.get("stdout_total_bytes", 0),
+                "stdout_head": (exec_result.get("stdout") or "")[:500],
+                "sandboxed": exec_result.get("sandboxed", False),
+                "sandbox_profile": exec_result.get("sandbox_profile", ""),
+                "sandbox_args": exec_result.get("sandbox_args", []),
+            }
+            # Full policies_evaluated list in the audit (envelope keeps the count).
+            if policy_decision:
+                result_summary["policy_decision"] = policy_decision
+
             logged_id = audit.log(
                 tool="run_command",
                 params={"command": command, "purpose": purpose},
-                result_summary={
-                    "exit_code": exec_result["exit_code"],
-                    "output_file": exec_result.get("output_file", ""),
-                    "output_sha256": exec_result.get("output_sha256", ""),
-                    "stdout_bytes": exec_result.get("stdout_total_bytes", 0),
-                    "stdout_head": (exec_result.get("stdout") or "")[:500],
-                    "sandboxed": exec_result.get("sandboxed", False),
-                    "sandbox_profile": exec_result.get("sandbox_profile", ""),
-                    "sandbox_args": exec_result.get("sandbox_args", []),
-                },
+                result_summary=result_summary,
                 audit_id=audit_id,
                 elapsed_ms=elapsed * 1000,
                 input_files=list(input_hashes.keys()) if input_hashes else None,
