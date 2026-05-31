@@ -48,3 +48,7 @@ Thumbs.db
 pytest-of-user/
 *.db
 *.db-journal
+
+# Local tool binaries (fetched/built locally, not source)
+/tools/opa
+/bubblewrap-*.tar.xz
