@@ -1,5 +1,7 @@
 """Tests for MCP server instruction strings."""
 
+import pytest
+
 from sift_common.instructions import (
     FORENSIC_MCP,
     FORENSIC_RAG,
@@ -58,6 +60,10 @@ class TestServerInstructionsWired:
     """Verify server constructors receive instructions."""
 
     def test_forensic_mcp_server_has_instructions(self):
+        pytest.importorskip(
+            "forensic_mcp",
+            reason="forensic_mcp package not installed in this environment",
+        )
         from forensic_mcp.server import create_server
 
         server = create_server()
