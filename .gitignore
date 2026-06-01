@@ -32,7 +32,9 @@ compiled/
 packages/windows-triage/data/*.db
 
 # Claude Code
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/agents/*.md
 CLAUDE.md
 !claude-code/**/CLAUDE.md
 

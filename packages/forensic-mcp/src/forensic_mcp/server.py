@@ -247,6 +247,18 @@ def create_server(reference_mode: str = "resources") -> FastMCP:
                         "For stronger provenance, re-run analysis through MCP tools."
                     )
 
+            result["verification"] = {
+                "status": "PENDING",
+                "finding_id": result.get("finding_id", ""),
+                "action": (
+                    "Delegate to forensic-critic to verify this finding against "
+                    "raw evidence before examiner review. The critic should "
+                    "check whether each factual claim is supported by actual "
+                    "tool output."
+                ),
+                "case_dir": str(manager.active_case_dir or ""),
+            }
+
         # Enrich validation failures with rule citations
         if result.get("status") == "VALIDATION_FAILED":
             result["guidance"] = _build_validation_guidance(result.get("errors", []))

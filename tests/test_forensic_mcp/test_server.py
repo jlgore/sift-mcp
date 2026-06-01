@@ -493,6 +493,10 @@ class TestEnhancedResponses:
         assert len(data["considerations"]) > 0
         assert "finding_status" in data
         assert "DRAFT" in data["finding_status"]
+        assert data["verification"]["status"] == "PENDING"
+        assert data["verification"]["finding_id"] == data["finding_id"]
+        assert "forensic-critic" in data["verification"]["action"]
+        assert data["verification"]["case_dir"]
 
     @pytest.mark.asyncio
     async def test_record_finding_attribution_considerations(

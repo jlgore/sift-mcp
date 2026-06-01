@@ -106,6 +106,16 @@ If you run a command via Bash or another tool outside MCP, call this afterward w
 
 **Investigation rhythm:** After completing analysis of an artifact or artifact type (e.g., after parsing all prefetch files, after examining event logs), pause and assess: Did I identify anything the examiner should know about? If yes, present the evidence and record a finding. Did I encounter key timestamps for the incident narrative? If yes, record timeline events. Am I about to change direction? If yes, log the reasoning.
 
+## Finding Verification
+
+After `record_finding()` stages a finding, delegate to the forensic-critic subagent before moving on to the next artifact. The critic verifies every factual claim in the finding against raw tool output and evidence files.
+
+- If the critic returns VERIFIED: proceed to the next artifact
+- If the critic returns NEEDS_CORRECTION: update the finding with corrected values (timestamps, hashes, paths, confidence level) and re-stage
+- If the critic returns UNRELIABLE: withdraw the finding and re-analyze the evidence before re-staging
+
+Do not skip verification. Unverified findings risk wasting examiner time on hallucinated or inaccurate claims.
+
 ## Human-in-the-Loop
 All findings and timeline events stage as DRAFT. The human analyst reviews and
 approves via `vhir approve` — this is structural, not optional. The AI cannot
