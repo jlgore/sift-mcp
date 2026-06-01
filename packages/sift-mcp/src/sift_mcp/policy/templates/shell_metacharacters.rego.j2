@@ -5,9 +5,19 @@ import rego.v1
 
 # Shell metacharacters anywhere in any argument (security.py:_DANGEROUS_PATTERNS).
 # Scans the full args list so substrings like "foo; rm" are caught.
+#
+# Scoped OUT for the harness-hook source: that path evaluates a full shell
+# command line (run via `bash -c` inside the bwrap sandbox), where &&, |, >,
+# etc. are normal shell syntax rather than argument-injection. The structured
+# run_command(tool, args) path sets no `input.source`, so it still enforces.
 deny contains msg if {
+	not _harness_hook
 	some arg in input.args
 	some pattern in data.shell_metacharacters
 	contains(arg, pattern)
 	msg := sprintf("shell metacharacter '%s' detected in argument", [pattern])
 }
+
+# True only when the request originates from a harness hook (a shell line).
+# Undefined (false-y) otherwise, so `not _harness_hook` holds for run_command.
+_harness_hook if input.source == "harness_hook"

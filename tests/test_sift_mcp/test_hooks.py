@@ -356,8 +356,26 @@ class TestGateSubprocess:
         )
         assert proc.returncode == 0
 
-    def test_shell_metacharacter_denied(self):
-        payload = json.dumps({"tool_input": {"command": "cat /evidence/f; rm -rf /"}})
+    def test_shell_metacharacters_allowed_for_harness_hook(self):
+        # The harness hook evaluates a full shell command line, so shell
+        # metacharacters (&&, |, ;, >) are normal syntax — not argument
+        # injection — and must NOT be denied. That rule is scoped to the
+        # structured run_command(tool, args) path, where it still fires.
+        payload = json.dumps({"tool_input": {"command": "cd /tmp && ls | head"}})
+        proc = subprocess.run(
+            [sys.executable, "-m", "sift_mcp.hooks.gate"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "SIFT_POLICY_ENGINE": "1"},
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    def test_harness_hook_still_denies_protected_rm(self):
+        # Scoping out metacharacters must not weaken the rules that matter:
+        # rm in a protected evidence directory is still denied at the hook.
+        payload = json.dumps({"tool_input": {"command": "rm -rf /evidence"}})
         proc = subprocess.run(
             [sys.executable, "-m", "sift_mcp.hooks.gate"],
             input=payload,
@@ -367,7 +385,36 @@ class TestGateSubprocess:
             env={**os.environ, "SIFT_POLICY_ENGINE": "1"},
         )
         assert proc.returncode == 2
-        assert "metacharacter" in proc.stderr.lower() or ";" in proc.stderr
+        assert "rm" in proc.stderr.lower()
+
+    def _gate(self, command: str):
+        payload = json.dumps({"tool_input": {"command": command}})
+        return subprocess.run(
+            [sys.executable, "-m", "sift_mcp.hooks.gate"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "SIFT_POLICY_ENGINE": "1"},
+        )
+
+    def test_dangerous_command_hidden_after_operator_is_denied(self):
+        # Decomposition (Layer 1 depth): a dangerous command chained after a
+        # benign one must still be caught — not left only to the sandbox.
+        proc = self._gate("echo hi && rm -rf /evidence")
+        assert proc.returncode == 2
+        assert "rm" in proc.stderr.lower()
+
+    def test_dangerous_command_inside_substitution_is_denied(self):
+        # The hidden rm inside $(...) is surfaced and denied.
+        proc = self._gate("echo $(rm -rf /evidence)")
+        assert proc.returncode == 2
+        assert "rm" in proc.stderr.lower()
+
+    def test_benign_compound_command_allowed(self):
+        # A compound line with no dangerous sub-command flows normally.
+        proc = self._gate("cd /tmp && ls | head")
+        assert proc.returncode == 0, proc.stderr
 
 
 # ---------------------------------------------------------------------------

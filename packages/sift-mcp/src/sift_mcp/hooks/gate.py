@@ -300,20 +300,39 @@ def main() -> int:
                 _emit_rewrite(parsed, wrapped)
         return 0
 
+    # Decompose the shell line into its constituent simple commands so EACH is
+    # policy-checked on its own. A dangerous command hidden after an operator
+    # (``a && rm -rf /evidence``) or inside a substitution (``$(rm ...)``) is
+    # caught at Layer 1 here — not left solely to the Layer 2 sandbox. Falls
+    # back to the whole command on any decomposition trouble.
     try:
-        decision = evaluate_command(parsed.argv)
-    except Exception as exc:
-        # Policy engine error — fail open (same behavior as run_command).
-        print(f"warning: policy engine error: {exc}", file=sys.stderr)
-        return 0
+        from sift_mcp.hooks.shell_decompose import decompose_command_line
 
-    if not decision.get("allowed", False):
-        # Denied — audit, surface reasons, block.
-        _audit_denial(parsed.argv, decision)
-        reasons = decision.get("reasons", ["command denied by policy"])
-        deny_msg = "Policy denial: " + "; ".join(reasons)
-        print(deny_msg, file=sys.stderr)
-        return 2
+        subcommands = decompose_command_line(parsed.raw) or [parsed.argv]
+    except Exception:  # noqa: BLE001 — decomposition must never break the gate
+        subcommands = [parsed.argv]
+
+    for sub in subcommands:
+        try:
+            # Tag as the harness-hook source: each sub-command is a real
+            # [tool, *args] with operators removed, but a word may still carry
+            # a substitution token ($(...)); the shell_metacharacters rule is
+            # scoped out for this source so that isn't a false positive. Every
+            # other rule (rm_protection, denied_binaries, path policy) applies.
+            decision = evaluate_command(sub, context_extra={"source": "harness_hook"})
+        except Exception as exc:
+            # Policy engine error — fail open for this sub-command (same
+            # behavior as run_command), and keep checking the rest.
+            print(f"warning: policy engine error: {exc}", file=sys.stderr)
+            continue
+
+        if not decision.get("allowed", False):
+            # Denied — audit, surface reasons, block the whole line.
+            _audit_denial(sub, decision)
+            reasons = decision.get("reasons", ["command denied by policy"])
+            deny_msg = "Policy denial: " + "; ".join(reasons)
+            print(deny_msg, file=sys.stderr)
+            return 2
 
     # Allowed — wrap in bwrap sandbox if enabled, then emit rewrite envelope.
     wrapped = _build_sandboxed_command(parsed)
