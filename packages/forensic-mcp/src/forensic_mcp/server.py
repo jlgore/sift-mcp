@@ -496,6 +496,153 @@ def create_server(reference_mode: str = "resources") -> FastMCP:
             result["warning"] = "Audit write failed — action not recorded"
         return result
 
+    # --- Evidence Graph ---
+
+    @server.tool()
+    def evidence_chain(finding_id: str) -> dict:
+        """Trace provenance from a finding through audit entries to registered evidence."""
+        from forensic_mcp.graph import queries
+
+        _validate_str_length(finding_id, "finding_id", _MAX_SHORT)
+        try:
+            result = queries.evidence_chain(manager.get_evidence_graph(), finding_id)
+        except Exception as e:
+            logger.error("evidence_chain failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="evidence_chain",
+            params={"finding_id": finding_id},
+            result_summary={
+                "chain_length": result.get("chain_length"),
+                "chain_complete": result.get("chain_complete"),
+            },
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
+    @server.tool()
+    def cross_reference(entity: str, entity_type: str = "") -> dict:
+        """Find graph nodes connected to a filename, hash, hostname, account, IOC, or ID."""
+        from forensic_mcp.graph import queries
+
+        _validate_str_length(entity, "entity", _MAX_TITLE)
+        _validate_str_length(entity_type, "entity_type", _MAX_SHORT)
+        try:
+            result = queries.cross_reference(
+                manager.get_evidence_graph(), entity, entity_type
+            )
+        except Exception as e:
+            logger.error("cross_reference failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="cross_reference",
+            params={"entity": entity, "entity_type": entity_type},
+            result_summary={"total_matches": result.get("total_matches")},
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
+    @server.tool()
+    def temporal_neighbors(
+        timestamp: str, window_seconds: int = 300, host: str = ""
+    ) -> dict:
+        """Find findings and timeline events within a time window of a timestamp."""
+        from forensic_mcp.graph import queries
+
+        _validate_str_length(timestamp, "timestamp", _MAX_SHORT)
+        _validate_str_length(host, "host", _MAX_SHORT)
+        try:
+            result = queries.temporal_neighbors(
+                manager.get_evidence_graph(), timestamp, window_seconds, host
+            )
+        except Exception as e:
+            logger.error("temporal_neighbors failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="temporal_neighbors",
+            params={
+                "timestamp": timestamp,
+                "window_seconds": window_seconds,
+                "host": host,
+            },
+            result_summary={"neighbors": len(result.get("neighbors", []))},
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
+    @server.tool()
+    def corroboration_map(finding_id: str = "") -> dict:
+        """Analyze corroboration depth for one finding or all findings."""
+        from forensic_mcp.graph import queries
+
+        _validate_str_length(finding_id, "finding_id", _MAX_SHORT)
+        try:
+            result = queries.corroboration_map(manager.get_evidence_graph(), finding_id)
+        except Exception as e:
+            logger.error("corroboration_map failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="corroboration_map",
+            params={"finding_id": finding_id},
+            result_summary={
+                "finding_id": result.get("finding_id"),
+                "corroboration": result.get("corroboration"),
+                "total_findings": result.get("total_findings"),
+            },
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
+    @server.tool()
+    def host_summary(hostname: str = "") -> dict:
+        """Aggregate findings, events, IOCs, and evidence for one host or all hosts."""
+        from forensic_mcp.graph import queries
+
+        _validate_str_length(hostname, "hostname", _MAX_SHORT)
+        try:
+            result = queries.host_summary(manager.get_evidence_graph(), hostname)
+        except Exception as e:
+            logger.error("host_summary failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="host_summary",
+            params={"hostname": hostname},
+            result_summary={
+                "host": result.get("host"),
+                "total_hosts": result.get("total_hosts"),
+            },
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
+    @server.tool()
+    def rebuild_evidence_graph() -> dict:
+        """Force evidence graph rebuild from active case files and return graph stats."""
+        from forensic_mcp.graph import queries
+
+        try:
+            result = queries.rebuild_evidence_graph(manager.get_evidence_graph())
+        except Exception as e:
+            logger.error("rebuild_evidence_graph failed: %s", e)
+            return {"error": str(e)}
+        logged_id = audit.log(
+            tool="rebuild_evidence_graph",
+            params={},
+            result_summary={
+                "nodes": result.get("nodes"),
+                "edges": result.get("edges"),
+                "elapsed_ms": result.get("elapsed_ms"),
+            },
+        )
+        if logged_id is None:
+            result["warning"] = "Audit write failed — action not recorded"
+        return result
+
     # --- Discipline Reference Data ---
 
     if reference_mode == "resources":

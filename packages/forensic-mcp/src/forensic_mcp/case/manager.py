@@ -451,6 +451,7 @@ class CaseManager:
     def __init__(self) -> None:
         self._active_case_id: str | None = None
         self._active_case_path: Path | None = None
+        self._evidence_graph = None
 
     @property
     def cases_dir(self) -> Path:
@@ -1584,6 +1585,15 @@ class CaseManager:
     def list_evidence(self) -> list[dict]:
         case_dir = self._require_active_case()
         return self._load_evidence_registry(case_dir).get("files", [])
+
+    def get_evidence_graph(self):
+        """Return lazy evidence graph for the active case."""
+        from forensic_mcp.graph import EvidenceGraph
+
+        case_dir = self._require_active_case()
+        if self._evidence_graph is None or self._evidence_graph.case_dir != case_dir:
+            self._evidence_graph = EvidenceGraph(case_dir)
+        return self._evidence_graph
 
     # --- Grounding Score ---
 
