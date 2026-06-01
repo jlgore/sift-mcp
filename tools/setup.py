@@ -76,6 +76,95 @@ def _header(msg: str) -> None:
     print(f"\n{_BOLD}{_CYAN}{msg}{_RESET}")
 
 
+# ──────────────────────────── scope helpers ───────────────────────────────────
+
+# Marker used to make the global discipline-file import idempotent.
+_MEM_MARKER = "<!-- sift-mcp:forensic-discipline -->"
+
+
+def _backup_once(path: Path) -> None:
+    """Make a one-time .sift-bak copy of an existing config before we edit it.
+
+    Only the first edit creates the backup, so re-running setup never clobbers
+    the user's pristine pre-sift state.
+    """
+    if path.exists():
+        bak = path.with_name(path.name + ".sift-bak")
+        if not bak.exists():
+            shutil.copy2(path, bak)
+
+
+def _load_json_lenient(path: Path) -> dict:
+    """Load a JSON / JSONC config, tolerating comment lines and trailing state.
+
+    OpenCode uses ``opencode.jsonc``; Claude's ``~/.claude.json`` is plain JSON
+    but large. Returns ``{}`` for a missing file.
+    """
+    if not path.exists():
+        return {}
+    text = path.read_text()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re
+
+        # Strip /* block */ comments and whole-line // comments only — never an
+        # inline // so we don't corrupt URLs like https://… inside values.
+        stripped = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        stripped = re.sub(r"(?m)^\s*//.*$", "", stripped)
+        return json.loads(stripped)
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _install_discipline(harness_id: str, project_dir: str, scope: str) -> str:
+    """Place the forensic-discipline instructions for the given harness/scope.
+
+    user scope:
+      - claude-code → append an ``@AGENTS.md`` import to ~/.claude/CLAUDE.md
+        (Claude Code reads CLAUDE.md, not AGENTS.md, globally).
+      - opencode    → copy AGENTS.md to ~/.config/opencode/AGENTS.md.
+    project scope: copy AGENTS.md into the project root (legacy behaviour).
+    """
+    home = Path.home()
+    if not _AGENTS_MD.exists():
+        return "agents: AGENTS.md source not found (skipped)"
+
+    if scope == "project":
+        agents_dst = Path(project_dir) / "AGENTS.md"
+        if agents_dst.exists():
+            return "agents: AGENTS.md already present"
+        shutil.copy2(_AGENTS_MD, agents_dst)
+        return "agents: copied AGENTS.md"
+
+    # user scope
+    if harness_id == "claude-code":
+        claude_md = home / ".claude" / "CLAUDE.md"
+        existing = claude_md.read_text() if claude_md.exists() else ""
+        if _MEM_MARKER in existing:
+            return "memory: discipline import already in ~/.claude/CLAUDE.md"
+        block = (
+            f"\n{_MEM_MARKER}\n"
+            f"# SIFT forensic discipline\n"
+            f"@{_AGENTS_MD}\n"
+        )
+        _backup_once(claude_md)
+        claude_md.parent.mkdir(parents=True, exist_ok=True)
+        claude_md.write_text(existing + block)
+        return "memory: appended AGENTS.md import to ~/.claude/CLAUDE.md"
+
+    # opencode (and any other harness that reads AGENTS.md natively)
+    agents_dst = home / ".config" / "opencode" / "AGENTS.md"
+    if agents_dst.exists():
+        return f"agents: AGENTS.md already present ({agents_dst})"
+    agents_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_AGENTS_MD, agents_dst)
+    return f"agents: copied AGENTS.md → {agents_dst}"
+
+
 # ──────────────────────────────── discovery ───────────────────────────────────
 
 
@@ -175,54 +264,80 @@ def install_claude_code(
     project_dir: str,
     gateway_url: str,
     auth_token: str = "",
+    scope: str = "user",
+    transport: str = "http",
+    gateway_config: str = "",
 ) -> list[str]:
-    """Install MCP config + policy gate hook for Claude Code."""
+    """Install MCP config + policy gate hook for Claude Code.
+
+    user scope (default) writes global config that applies to every project:
+      MCP   → ~/.claude.json   (top-level ``mcpServers`` = user scope)
+      hooks → ~/.claude/settings.json
+    project scope writes into the project directory (.mcp.json / settings.local.json).
+
+    transport="http"  → connect to a running gateway at ``gateway_url``.
+    transport="stdio" → Claude Code spawns the gateway itself on launch via
+      ``python -m sift_gateway --stdio`` (no separately-running service).
+    """
     results = []
     p = Path(project_dir)
+    home = Path.home()
 
-    # 1. MCP server config (.mcp.json)
-    mcp_path = p / ".mcp.json"
-    if mcp_path.exists():
-        mcp = json.loads(mcp_path.read_text())
+    if scope == "user":
+        mcp_path = home / ".claude.json"
+        settings_path = home / ".claude" / "settings.json"
     else:
-        mcp = {}
+        mcp_path = p / ".mcp.json"
+        settings_path = p / ".claude" / "settings.local.json"
 
+    # 1. MCP server config
+    _backup_once(mcp_path)
+    mcp = _load_json_lenient(mcp_path)
     servers = mcp.setdefault("mcpServers", {})
-    entry: dict = {"type": "streamable-http", "url": gateway_url}
-    if auth_token:
-        entry["headers"] = {"Authorization": f"Bearer {auth_token}"}
+    if transport == "stdio":
+        entry = {
+            "command": sys.executable,
+            "args": ["-m", "sift_gateway", "--stdio", "--config", gateway_config],
+        }
+    else:
+        entry = {"type": "streamable-http", "url": gateway_url}
+        if auth_token:
+            entry["headers"] = {"Authorization": f"Bearer {auth_token}"}
 
     if "vhir" in servers:
         results.append("mcp: vhir already configured (updated URL)")
     else:
         results.append("mcp: added vhir server")
     servers["vhir"] = entry
-    mcp_path.write_text(json.dumps(mcp, indent=2) + "\n")
+    _write_json(mcp_path, mcp)
+    results.append(f"mcp: wrote {mcp_path}")
 
     # 2. Policy gate hook (PreToolUse with updatedInput for bwrap wrapping)
-    claude_dir = p / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    settings_path = claude_dir / "settings.local.json"
-
-    if settings_path.exists():
-        settings = json.loads(settings_path.read_text())
-    else:
-        settings = {}
-
+    _backup_once(settings_path)
+    settings = _load_json_lenient(settings_path)
     hooks = settings.setdefault("hooks", {})
     pre_tool = hooks.setdefault("PreToolUse", [])
 
-    gate_cmd = f"{sys.executable} -m sift_mcp.hooks.gate"
-    already = any(
-        any(
-            h.get("command", "").endswith("sift_mcp.hooks.gate")
-            for h in entry_item.get("hooks", [])
-        )
-        for entry_item in pre_tool
-    )
-    if already:
-        results.append("hook: policy gate already installed")
-    else:
+    # Bake the enforcement toggles into the hook command itself so the gate
+    # enforces regardless of how the harness was launched. Without these, the
+    # gate inherits the agent's ambient environment and silently no-ops when
+    # SIFT_POLICY_ENGINE / SIFT_SANDBOX aren't exported (a common footgun).
+    opa_path = _which("opa") or str(_REPO_ROOT / "tools" / "opa")
+    gate_env = f"SIFT_POLICY_ENGINE=1 SIFT_SANDBOX=1 SIFT_OPA_PATH={opa_path}"
+    gate_cmd = f"env {gate_env} {sys.executable} -m sift_mcp.hooks.gate"
+
+    # Find an existing sift gate hook (match on the module, not the full
+    # command, so we can upgrade an older command in place).
+    gate_hook = None
+    for entry_item in pre_tool:
+        for h in entry_item.get("hooks", []):
+            if h.get("command", "").rstrip().endswith("sift_mcp.hooks.gate"):
+                gate_hook = h
+                break
+        if gate_hook:
+            break
+
+    if gate_hook is None:
         pre_tool.append({
             "matcher": "Bash",
             "hooks": [{
@@ -232,16 +347,17 @@ def install_claude_code(
             }],
         })
         results.append("hook: installed policy gate (PreToolUse → Bash)")
+    elif gate_hook.get("command") != gate_cmd:
+        gate_hook["command"] = gate_cmd
+        results.append("hook: updated policy gate (enforcement env baked in)")
+    else:
+        results.append("hook: policy gate already installed")
 
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    _write_json(settings_path, settings)
+    results.append(f"hook: wrote {settings_path}")
 
-    # 3. AGENTS.md (copy if not present)
-    agents_dst = p / "AGENTS.md"
-    if not agents_dst.exists() and _AGENTS_MD.exists():
-        shutil.copy2(_AGENTS_MD, agents_dst)
-        results.append("agents: copied AGENTS.md")
-    elif agents_dst.exists():
-        results.append("agents: AGENTS.md already present")
+    # 3. Forensic discipline instructions
+    results.append(_install_discipline("claude-code", project_dir, scope))
 
     return results
 
@@ -309,18 +425,39 @@ def install_opencode(
     project_dir: str,
     gateway_url: str,
     auth_token: str = "",
+    scope: str = "user",
+    transport: str = "http",
+    gateway_config: str = "",
 ) -> list[str]:
-    """Install MCP config + TypeScript plugin for OpenCode."""
+    """Install MCP config + TypeScript plugin for OpenCode.
+
+    user scope (default) writes global config under ~/.config/opencode:
+      config → ~/.config/opencode/opencode.jsonc (or opencode.json)
+      plugin → ~/.config/opencode/plugins/sift-policy-gate.ts
+    project scope writes into ./opencode.json and ./.opencode/plugins/.
+
+    Only ``transport="http"`` is supported here — OpenCode's MCP config uses a
+    remote URL; a stdio spawn form isn't wired for it yet.
+    """
     results = []
     p = Path(project_dir)
+    home = Path.home()
+    if transport == "stdio":
+        results.append("mcp: stdio transport not supported for OpenCode — using http url")
 
-    # 1. MCP server config (opencode.json)
-    oc_config_path = p / "opencode.json"
-    if oc_config_path.exists():
-        oc_config = json.loads(oc_config_path.read_text())
+    if scope == "user":
+        cfg_dir = home / ".config" / "opencode"
+        plugin_dir = cfg_dir / "plugins"
     else:
-        oc_config = {}
+        cfg_dir = p
+        plugin_dir = p / ".opencode" / "plugins"
 
+    # 1. MCP server config — honour an existing .jsonc, else default to .json
+    jsonc = cfg_dir / "opencode.jsonc"
+    oc_config_path = jsonc if jsonc.exists() else cfg_dir / "opencode.json"
+
+    _backup_once(oc_config_path)
+    oc_config = _load_json_lenient(oc_config_path)
     mcp = oc_config.setdefault("mcp", {})
     entry: dict = {"type": "http", "url": gateway_url, "enabled": True}
     if auth_token:
@@ -331,10 +468,10 @@ def install_opencode(
     else:
         results.append("mcp: added vhir server")
     mcp["vhir"] = entry
-    oc_config_path.write_text(json.dumps(oc_config, indent=2) + "\n")
+    _write_json(oc_config_path, oc_config)
+    results.append(f"mcp: wrote {oc_config_path}")
 
-    # 2. TypeScript plugin (.opencode/plugins/sift-policy-gate.ts)
-    plugin_dir = p / ".opencode" / "plugins"
+    # 2. TypeScript plugin
     plugin_dir.mkdir(parents=True, exist_ok=True)
     plugin_path = plugin_dir / "sift-policy-gate.ts"
 
@@ -345,14 +482,10 @@ def install_opencode(
     else:
         results.append("hook: installed policy gate plugin")
     plugin_path.write_text(plugin_code)
+    results.append(f"hook: wrote {plugin_path}")
 
-    # 3. AGENTS.md
-    agents_dst = p / "AGENTS.md"
-    if not agents_dst.exists() and _AGENTS_MD.exists():
-        shutil.copy2(_AGENTS_MD, agents_dst)
-        results.append("agents: copied AGENTS.md")
-    elif agents_dst.exists():
-        results.append("agents: AGENTS.md already present")
+    # 3. Forensic discipline instructions
+    results.append(_install_discipline("opencode", project_dir, scope))
 
     return results
 
@@ -422,18 +555,40 @@ def install_pi(
     project_dir: str,
     gateway_url: str,
     auth_token: str = "",
+    scope: str = "user",
+    transport: str = "http",
+    gateway_config: str = "",
 ) -> list[str]:
-    """Install MCP config + TypeScript extension for Pi."""
+    """Install MCP config + TypeScript extension for Pi.
+
+    user scope (default) writes under ~/.pi (global); project scope writes into
+    ./.mcp.json and ./.pi (or ./.omp) hooks.
+
+    Only ``transport="http"`` is supported here.
+    """
     results = []
     p = Path(project_dir)
+    home = Path.home()
+    if transport == "stdio":
+        results.append("mcp: stdio transport not supported for Pi — using http url")
+
+    if scope == "user":
+        mcp_path = home / ".pi" / ".mcp.json"
+        hooks_dir = home / ".pi" / "hooks"
+    else:
+        mcp_path = p / ".mcp.json"
+        # Try .omp first (oh-my-pi), fall back to .pi
+        hooks_dir = None
+        for candidate in [p / ".omp" / "hooks", p / ".pi" / "hooks"]:
+            if candidate.parent.exists() or candidate.parent == p / ".pi":
+                hooks_dir = candidate
+                break
+        if hooks_dir is None:
+            hooks_dir = p / ".pi" / "hooks"
 
     # 1. MCP server config (.mcp.json — Pi reads this natively)
-    mcp_path = p / ".mcp.json"
-    if mcp_path.exists():
-        mcp = json.loads(mcp_path.read_text())
-    else:
-        mcp = {}
-
+    _backup_once(mcp_path)
+    mcp = _load_json_lenient(mcp_path)
     servers = mcp.setdefault("mcpServers", {})
     entry: dict = {"type": "http", "url": gateway_url}
     if auth_token:
@@ -444,19 +599,11 @@ def install_pi(
     else:
         results.append("mcp: added vhir server")
     servers["vhir"] = entry
-    mcp_path.write_text(json.dumps(mcp, indent=2) + "\n")
+    _write_json(mcp_path, mcp)
+    results.append(f"mcp: wrote {mcp_path}")
 
     # 2. TypeScript extension
-    # Try .omp first (oh-my-pi), fall back to .pi
-    hooks_dir = None
-    for candidate in [p / ".omp" / "hooks", p / ".pi" / "hooks"]:
-        if candidate.parent.exists() or candidate.parent == p / ".pi":
-            hooks_dir = candidate
-            break
-    if hooks_dir is None:
-        hooks_dir = p / ".pi" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-
     ext_path = hooks_dir / "sift-policy-gate.ts"
     ext_code = _PI_EXTENSION_TEMPLATE.format(python_bin=sys.executable)
 
@@ -466,13 +613,8 @@ def install_pi(
         results.append(f"hook: installed extension at {ext_path}")
     ext_path.write_text(ext_code)
 
-    # 3. AGENTS.md
-    agents_dst = p / "AGENTS.md"
-    if not agents_dst.exists() and _AGENTS_MD.exists():
-        shutil.copy2(_AGENTS_MD, agents_dst)
-        results.append("agents: copied AGENTS.md")
-    elif agents_dst.exists():
-        results.append("agents: AGENTS.md already present")
+    # 3. Forensic discipline instructions
+    results.append(_install_discipline("pi", project_dir, scope))
 
     return results
 
@@ -546,34 +688,47 @@ def interactive_menu(detected: list[HarnessInfo]) -> list[str]:
 # ──────────────────────────── verify ──────────────────────────────────────────
 
 
-def verify_installation(harness_id: str, project_dir: str) -> list[str]:
-    """Post-install verification checks."""
+def verify_installation(harness_id: str, project_dir: str, scope: str = "user") -> list[str]:
+    """Post-install verification checks (scope-aware)."""
     issues = []
     p = Path(project_dir)
+    home = Path.home()
 
     if harness_id == "claude-code":
-        if not (p / ".mcp.json").exists():
-            issues.append("missing .mcp.json")
-        if not (p / ".claude" / "settings.local.json").exists():
-            issues.append("missing .claude/settings.local.json")
+        if scope == "user":
+            if not (home / ".claude.json").exists():
+                issues.append("missing ~/.claude.json")
+            if not (home / ".claude" / "settings.json").exists():
+                issues.append("missing ~/.claude/settings.json")
+        else:
+            if not (p / ".mcp.json").exists():
+                issues.append("missing .mcp.json")
+            if not (p / ".claude" / "settings.local.json").exists():
+                issues.append("missing .claude/settings.local.json")
 
     elif harness_id == "opencode":
-        if not (p / "opencode.json").exists():
-            issues.append("missing opencode.json")
-        plugin = p / ".opencode" / "plugins" / "sift-policy-gate.ts"
-        if not plugin.exists():
-            issues.append(f"missing plugin: {plugin}")
+        cfg_dir = (home / ".config" / "opencode") if scope == "user" else p
+        if not (cfg_dir / "opencode.jsonc").exists() and not (cfg_dir / "opencode.json").exists():
+            issues.append(f"missing opencode.json(c) in {cfg_dir}")
+        plugin_dir = cfg_dir / "plugins" if scope == "user" else p / ".opencode" / "plugins"
+        if not (plugin_dir / "sift-policy-gate.ts").exists():
+            issues.append(f"missing plugin: {plugin_dir / 'sift-policy-gate.ts'}")
 
     elif harness_id == "pi":
-        if not (p / ".mcp.json").exists():
-            issues.append("missing .mcp.json")
-        found_ext = False
-        for d in [p / ".omp" / "hooks", p / ".pi" / "hooks"]:
-            if (d / "sift-policy-gate.ts").exists():
-                found_ext = True
-                break
-        if not found_ext:
-            issues.append("missing sift-policy-gate.ts extension")
+        if scope == "user":
+            if not (home / ".pi" / ".mcp.json").exists():
+                issues.append("missing ~/.pi/.mcp.json")
+            if not (home / ".pi" / "hooks" / "sift-policy-gate.ts").exists():
+                issues.append("missing ~/.pi/hooks/sift-policy-gate.ts")
+        else:
+            if not (p / ".mcp.json").exists():
+                issues.append("missing .mcp.json")
+            found_ext = any(
+                (d / "sift-policy-gate.ts").exists()
+                for d in [p / ".omp" / "hooks", p / ".pi" / "hooks"]
+            )
+            if not found_ext:
+                issues.append("missing sift-policy-gate.ts extension")
 
     return issues
 
@@ -592,6 +747,8 @@ examples:
   python3 -m sift_mcp.setup --all                     # all detected
   python3 -m sift_mcp.setup --harness claude-code     # specific harness
   python3 -m sift_mcp.setup --list                    # just detect
+  python3 -m sift_mcp.setup --all --global            # global, every project (default scope)
+  python3 -m sift_mcp.setup --all --project           # this directory only
   python3 -m sift_mcp.setup --gateway-url http://192.168.8.129:4508/mcp
   python3 -m sift_mcp.setup --auth-token vhir_gw_abc123
 """,
@@ -628,7 +785,49 @@ examples:
         default="",
         help="Bearer token for gateway auth (remote deployments).",
     )
+    parser.add_argument(
+        "--scope",
+        choices=["user", "project"],
+        default="user",
+        help="Install globally for the user (default) or into --project-dir only.",
+    )
+    parser.add_argument(
+        "--global",
+        dest="scope",
+        action="store_const",
+        const="user",
+        help="Alias for --scope user (global — applies to every project).",
+    )
+    parser.add_argument(
+        "--project",
+        dest="scope",
+        action="store_const",
+        const="project",
+        help="Alias for --scope project (this directory only).",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["http", "stdio"],
+        default="http",
+        help=(
+            "Claude Code MCP transport. 'http' connects to a running gateway "
+            "(--gateway-url); 'stdio' makes Claude Code spawn the gateway on "
+            "launch via 'python -m sift_gateway --stdio' (no running service)."
+        ),
+    )
+    parser.add_argument(
+        "--gateway-config",
+        default="",
+        help=(
+            "Gateway YAML config for --transport stdio "
+            "(default: <repo>/config/gateway.e2e.yaml)."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    gateway_config = args.gateway_config or str(
+        _REPO_ROOT / "config" / "gateway.e2e.yaml"
+    )
 
     project = os.path.abspath(args.project_dir)
 
@@ -689,10 +888,19 @@ examples:
 
     # ── confirmation ──
     _header("Installation Plan")
+    if args.scope == "user":
+        print(f"  {_BOLD}Scope:{_RESET} user / global  {_DIM}(applies to every project){_RESET}")
+    else:
+        print(f"  {_BOLD}Scope:{_RESET} project  {_DIM}({project}){_RESET}")
     for hid in selected:
         info = next(h for h in detected if h.id == hid)
         print(f"  {_BOLD}{info.name}{_RESET}")
-        print(f"    MCP endpoint:  {args.gateway_url}")
+        if hid == "claude-code" and args.transport == "stdio":
+            print(f"    MCP transport: stdio (spawned on launch)")
+            print(f"    Gateway cmd:   {sys.executable} -m sift_gateway --stdio")
+            print(f"    Gateway cfg:   {gateway_config}")
+        else:
+            print(f"    MCP endpoint:  {args.gateway_url}")
         print(f"    Policy gate:   OPA → bwrap sandbox wrapping")
         if hid == "claude-code":
             print(f"    Hook type:     PreToolUse (updatedInput)")
@@ -725,7 +933,14 @@ examples:
         installer = _INSTALLERS[hid]
 
         try:
-            results = installer(project, args.gateway_url, args.auth_token)
+            results = installer(
+                project,
+                args.gateway_url,
+                args.auth_token,
+                args.scope,
+                args.transport,
+                gateway_config,
+            )
             for r in results:
                 _ok(r)
         except Exception as exc:
@@ -734,7 +949,7 @@ examples:
             continue
 
         # Verify
-        issues = verify_installation(hid, project)
+        issues = verify_installation(hid, project, args.scope)
         if issues:
             for issue in issues:
                 _warn(f"verify: {issue}")
