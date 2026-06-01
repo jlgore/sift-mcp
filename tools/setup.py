@@ -46,6 +46,9 @@ _REPO_ROOT = _SIFT_MCP_PKG.parents[3] if _SIFT_MCP_PKG.name == "sift_mcp" else P
 
 _AGENTS_MD = _REPO_ROOT / "AGENTS.md"
 
+# Distributable Claude Code subagent definitions (forensic-critic, …).
+_SUBAGENTS_SRC = _REPO_ROOT / "claude-code" / "full" / "agents"
+
 # Colors (ANSI)
 _GREEN = "\033[92m"
 _YELLOW = "\033[93m"
@@ -163,6 +166,35 @@ def _install_discipline(harness_id: str, project_dir: str, scope: str) -> str:
     agents_dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(_AGENTS_MD, agents_dst)
     return f"agents: copied AGENTS.md → {agents_dst}"
+
+
+def _install_subagents(project_dir: str, scope: str) -> list[str]:
+    """Deploy Claude Code subagent definitions (e.g. forensic-critic).
+
+    Copies every ``claude-code/full/agents/*.md`` to the Claude Code agents
+    directory — ``~/.claude/agents/`` (user scope) or ``<project>/.claude/
+    agents/`` (project scope). Subagents are overwritten so updates propagate
+    on re-run, mirroring the hook/plugin behaviour.
+    """
+    results: list[str] = []
+    if not _SUBAGENTS_SRC.is_dir():
+        return results
+    sources = sorted(_SUBAGENTS_SRC.glob("*.md"))
+    if not sources:
+        return results
+
+    if scope == "user":
+        dest_dir = Path.home() / ".claude" / "agents"
+    else:
+        dest_dir = Path(project_dir) / ".claude" / "agents"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    for src in sources:
+        dst = dest_dir / src.name
+        verb = "updated" if dst.exists() else "installed"
+        shutil.copy2(src, dst)
+        results.append(f"agent: {verb} {src.stem} → {dst}")
+    return results
 
 
 # ──────────────────────────────── discovery ───────────────────────────────────
@@ -358,6 +390,9 @@ def install_claude_code(
 
     # 3. Forensic discipline instructions
     results.append(_install_discipline("claude-code", project_dir, scope))
+
+    # 4. Claude Code subagents (forensic-critic, …)
+    results.extend(_install_subagents(project_dir, scope))
 
     return results
 
@@ -904,6 +939,9 @@ examples:
         print(f"    Policy gate:   OPA → bwrap sandbox wrapping")
         if hid == "claude-code":
             print(f"    Hook type:     PreToolUse (updatedInput)")
+            _subagents = sorted(_SUBAGENTS_SRC.glob("*.md")) if _SUBAGENTS_SRC.is_dir() else []
+            if _subagents:
+                print(f"    Subagents:     {', '.join(s.stem for s in _subagents)} (→ .claude/agents/)")
         elif hid == "opencode":
             print(f"    Hook type:     TypeScript plugin (tool.execute.before)")
         elif hid == "pi":
