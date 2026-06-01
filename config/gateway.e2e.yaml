@@ -1,7 +1,8 @@
 # SIFT end-to-end test gateway config (Task 2).
 # Both enforcement layers ON via config (no manual SIFT_* exports — proves the
-# Task 1 apply_security_layers wiring). Only the sift-mcp backend is enabled;
-# the other backends' packages aren't installed in the test venv.
+# Task 1 apply_security_layers wiring). sift-mcp (forensic tools, sandboxed)
+# plus case-mcp (case lifecycle + evidence registry) are enabled; the latter
+# requires vhir-cli + case-mcp installed in the venv and an active case.
 gateway:
   host: "0.0.0.0"          # WSL's claude connects over the LAN
   port: 4508
@@ -28,5 +29,40 @@ backends:
     command: "python"
     args: ["-m", "sift_mcp"]
     env:
+      VHIR_CASE_DIR: "/cases/e2e-test"
+    enabled: true
+
+  # Case lifecycle + evidence registry (evidence_register, case_status, …).
+  # Resolves the active case from ~/.vhir/active_case; VHIR_CASES_DIR pins the
+  # cases root and VHIR_CASE_DIR pins this case explicitly as a fallback.
+  case-mcp:
+    type: stdio
+    command: "python"
+    args: ["-m", "case_mcp"]
+    env:
+      VHIR_CASES_DIR: "/cases"
+      VHIR_CASE_DIR: "/cases/e2e-test"
+    enabled: true
+
+  # Investigation recording (record_finding, record_timeline_event, …) +
+  # discipline reference. --deferred-tools surfaces the reference data as tools
+  # for clients without MCP resource support.
+  forensic-mcp:
+    type: stdio
+    command: "python"
+    args: ["-m", "forensic_mcp", "--deferred-tools"]
+    env:
+      VHIR_CASES_DIR: "/cases"
+      VHIR_CASE_DIR: "/cases/e2e-test"
+    enabled: true
+
+  # Report generation (generate_report, save_report, list_reports). Depends on
+  # vhir-cli; renders findings/timeline from the active case.
+  report-mcp:
+    type: stdio
+    command: "python"
+    args: ["-m", "report_mcp"]
+    env:
+      VHIR_CASES_DIR: "/cases"
       VHIR_CASE_DIR: "/cases/e2e-test"
     enabled: true
