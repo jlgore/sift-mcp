@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import sys
 from contextlib import AsyncExitStack
 
 from mcp.client.session import ClientSession
@@ -83,6 +84,15 @@ class StdioMCPBackend(MCPBackend):
             return
 
         command = self.config.get("command", "python")
+        # Resolve a bare "python"/"python3" to the interpreter running the
+        # gateway, so backends import from the same environment (e.g. the venv
+        # with sift_mcp installed) regardless of the child process PATH. This
+        # matters when the gateway is spawned directly (stdio mode / uvx /
+        # console script), where a bare "python" would otherwise resolve to a
+        # system interpreter that lacks the backend packages. Absolute paths
+        # and other commands are honoured as-is.
+        if command in ("python", "python3"):
+            command = sys.executable
         args = self.config.get("args", [])
         env = self.config.get("env") or None
 

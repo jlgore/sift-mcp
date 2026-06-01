@@ -546,6 +546,49 @@ class Gateway:
 
         return result
 
+    async def run_stdio(self) -> None:
+        """Serve the aggregated MCP tools over stdio (stdin/stdout).
+
+        Used when an agent harness spawns the gateway directly as a child
+        process (e.g. a Claude Code stdio MCP server, or a ``uvx`` /
+        console-script launch) instead of connecting to the HTTP service.
+        Backends, the late-start retry loop, and the idle reaper run exactly
+        as they do under the Starlette lifespan — only the transport differs.
+        Logs go to stderr (see ``sift_common.oplog``), so stdout stays a clean
+        JSON-RPC channel.
+
+        Dynamic backend join (the ``_backend_loader`` / ``/cases/join`` flow)
+        is HTTP-only and intentionally not wired here: stdio mode targets a
+        single local agent with a static backend set.
+        """
+        from mcp.server.stdio import stdio_server
+
+        mcp_server = create_mcp_server(self)
+
+        await self.start()
+        reaper_task = (
+            asyncio.create_task(self._idle_reaper())
+            if self.idle_timeout > 0
+            else None
+        )
+        late_start_task = asyncio.create_task(self._late_start_checker())
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    mcp_server.create_initialization_options(),
+                )
+        finally:
+            late_start_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await late_start_task
+            if reaper_task is not None:
+                reaper_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await reaper_task
+            await self.stop()
+
     def create_app(self) -> Starlette:
         """Build a Starlette application with all routes and middleware.
 

@@ -1,6 +1,7 @@
 """Entry point for sift-gateway."""
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -36,6 +37,15 @@ def main():
         default=None,
         help="Bind port (overrides config)",
     )
+    parser.add_argument(
+        "--stdio",
+        action="store_true",
+        help=(
+            "Serve over stdio instead of HTTP — for agent harnesses (Claude "
+            "Code, uvx, etc.) that spawn the gateway as a child process. "
+            "Ignores --host/--port/TLS."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -66,6 +76,13 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # stdio transport: spawn-as-child mode. Host/port/TLS are HTTP-only, so we
+    # branch here before validating them.
+    if args.stdio:
+        gateway = Gateway(config)
+        asyncio.run(gateway.run_stdio())
+        return
 
     # TLS configuration
     tls_config = gw_config.get("tls", {})
