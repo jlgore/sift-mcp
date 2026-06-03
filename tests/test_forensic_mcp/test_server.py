@@ -90,12 +90,14 @@ class TestServerSetup:
     @pytest.mark.asyncio
     async def test_tool_count_resources_mode(self, server):
         tools = await server.list_tools()
-        assert len(tools) == 9  # C1: removed get_case_status, list_cases, list_evidence
+        # 9 (C1: removed get_case_status/list_cases/list_evidence) + 6 evidence-graph tools
+        assert len(tools) == 15
 
     @pytest.mark.asyncio
     async def test_tool_count_tools_mode(self, tools_server):
         tools = await tools_server.list_tools()
-        assert len(tools) == 23  # C1: 26 - 3 removed duplicates
+        # 23 (C1: 26 - 3 removed duplicates) + 6 evidence-graph tools
+        assert len(tools) == 29
 
     @pytest.mark.asyncio
     async def test_expected_tools_present(self, server):
@@ -111,6 +113,13 @@ class TestServerSetup:
             "list_todos",
             "update_todo",
             "complete_todo",
+            # Evidence graph (be437cf)
+            "evidence_chain",
+            "cross_reference",
+            "temporal_neighbors",
+            "corroboration_map",
+            "host_summary",
+            "rebuild_evidence_graph",
         }
         assert names == expected
 
