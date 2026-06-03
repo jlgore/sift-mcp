@@ -213,6 +213,33 @@ def _which(name: str) -> str | None:
     return shutil.which(name)
 
 
+def _gate_python() -> str:
+    """Resolve an interpreter that can import sift_mcp for the policy gate.
+
+    The gate command is baked into harness configs with an absolute
+    interpreter path, so sys.executable is only correct when setup runs from
+    an env with sift-mcp installed. Fall back to the repo venv; fail loudly
+    rather than installing a hook that errors on every Bash call.
+    """
+    import subprocess
+
+    candidates = [sys.executable, str(_REPO_ROOT / ".venv" / "bin" / "python")]
+    for py in candidates:
+        if Path(py).exists() and (
+            subprocess.run(
+                [py, "-c", "import sift_mcp.hooks.gate"], capture_output=True
+            ).returncode
+            == 0
+        ):
+            return py
+    raise SystemExit(
+        "error: no interpreter can import sift_mcp "
+        f"(tried: {', '.join(candidates)}).\n"
+        "Run setup with the repo venv python "
+        "(.venv/bin/python tools/setup.py …) or install sift-mcp first."
+    )
+
+
 def detect_harness(harness_id: str, project_dir: str) -> HarnessInfo:
     """Detect whether a specific harness is present."""
     p = Path(project_dir)
@@ -299,6 +326,7 @@ def install_claude_code(
     scope: str = "user",
     transport: str = "http",
     gateway_config: str = "",
+    with_hook: bool = True,
 ) -> list[str]:
     """Install MCP config + policy gate hook for Claude Code.
 
@@ -328,7 +356,7 @@ def install_claude_code(
     servers = mcp.setdefault("mcpServers", {})
     if transport == "stdio":
         entry = {
-            "command": sys.executable,
+            "command": _gate_python(),
             "args": ["-m", "sift_gateway", "--stdio", "--config", gateway_config],
         }
     else:
@@ -345,48 +373,51 @@ def install_claude_code(
     results.append(f"mcp: wrote {mcp_path}")
 
     # 2. Policy gate hook (PreToolUse with updatedInput for bwrap wrapping)
-    _backup_once(settings_path)
-    settings = _load_json_lenient(settings_path)
-    hooks = settings.setdefault("hooks", {})
-    pre_tool = hooks.setdefault("PreToolUse", [])
-
-    # Bake the enforcement toggles into the hook command itself so the gate
-    # enforces regardless of how the harness was launched. Without these, the
-    # gate inherits the agent's ambient environment and silently no-ops when
-    # SIFT_POLICY_ENGINE / SIFT_SANDBOX aren't exported (a common footgun).
-    opa_path = _which("opa") or str(_REPO_ROOT / "tools" / "opa")
-    gate_env = f"SIFT_POLICY_ENGINE=1 SIFT_SANDBOX=1 SIFT_OPA_PATH={opa_path}"
-    gate_cmd = f"env {gate_env} {sys.executable} -m sift_mcp.hooks.gate"
-
-    # Find an existing sift gate hook (match on the module, not the full
-    # command, so we can upgrade an older command in place).
-    gate_hook = None
-    for entry_item in pre_tool:
-        for h in entry_item.get("hooks", []):
-            if h.get("command", "").rstrip().endswith("sift_mcp.hooks.gate"):
-                gate_hook = h
-                break
-        if gate_hook:
-            break
-
-    if gate_hook is None:
-        pre_tool.append({
-            "matcher": "Bash",
-            "hooks": [{
-                "type": "command",
-                "command": gate_cmd,
-                "timeout": 10,
-            }],
-        })
-        results.append("hook: installed policy gate (PreToolUse → Bash)")
-    elif gate_hook.get("command") != gate_cmd:
-        gate_hook["command"] = gate_cmd
-        results.append("hook: updated policy gate (enforcement env baked in)")
+    if not with_hook:
+        results.append("hook: skipped (--no-hook)")
     else:
-        results.append("hook: policy gate already installed")
+        _backup_once(settings_path)
+        settings = _load_json_lenient(settings_path)
+        hooks = settings.setdefault("hooks", {})
+        pre_tool = hooks.setdefault("PreToolUse", [])
 
-    _write_json(settings_path, settings)
-    results.append(f"hook: wrote {settings_path}")
+        # Bake the enforcement toggles into the hook command itself so the gate
+        # enforces regardless of how the harness was launched. Without these, the
+        # gate inherits the agent's ambient environment and silently no-ops when
+        # SIFT_POLICY_ENGINE / SIFT_SANDBOX aren't exported (a common footgun).
+        opa_path = _which("opa") or str(_REPO_ROOT / "tools" / "opa")
+        gate_env = f"SIFT_POLICY_ENGINE=1 SIFT_SANDBOX=1 SIFT_OPA_PATH={opa_path}"
+        gate_cmd = f"env {gate_env} {_gate_python()} -m sift_mcp.hooks.gate"
+
+        # Find an existing sift gate hook (match on the module, not the full
+        # command, so we can upgrade an older command in place).
+        gate_hook = None
+        for entry_item in pre_tool:
+            for h in entry_item.get("hooks", []):
+                if h.get("command", "").rstrip().endswith("sift_mcp.hooks.gate"):
+                    gate_hook = h
+                    break
+            if gate_hook:
+                break
+
+        if gate_hook is None:
+            pre_tool.append({
+                "matcher": "Bash",
+                "hooks": [{
+                    "type": "command",
+                    "command": gate_cmd,
+                    "timeout": 10,
+                }],
+            })
+            results.append("hook: installed policy gate (PreToolUse → Bash)")
+        elif gate_hook.get("command") != gate_cmd:
+            gate_hook["command"] = gate_cmd
+            results.append("hook: updated policy gate (enforcement env baked in)")
+        else:
+            results.append("hook: policy gate already installed")
+
+        _write_json(settings_path, settings)
+        results.append(f"hook: wrote {settings_path}")
 
     # 3. Forensic discipline instructions
     results.append(_install_discipline("claude-code", project_dir, scope))
@@ -463,6 +494,7 @@ def install_opencode(
     scope: str = "user",
     transport: str = "http",
     gateway_config: str = "",
+    with_hook: bool = True,
 ) -> list[str]:
     """Install MCP config + TypeScript plugin for OpenCode.
 
@@ -507,17 +539,20 @@ def install_opencode(
     results.append(f"mcp: wrote {oc_config_path}")
 
     # 2. TypeScript plugin
-    plugin_dir.mkdir(parents=True, exist_ok=True)
-    plugin_path = plugin_dir / "sift-policy-gate.ts"
-
-    plugin_code = _OPENCODE_PLUGIN_TEMPLATE.format(python_bin=sys.executable)
-
-    if plugin_path.exists():
-        results.append("hook: plugin already installed (overwritten)")
+    if not with_hook:
+        results.append("hook: skipped (--no-hook)")
     else:
-        results.append("hook: installed policy gate plugin")
-    plugin_path.write_text(plugin_code)
-    results.append(f"hook: wrote {plugin_path}")
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        plugin_path = plugin_dir / "sift-policy-gate.ts"
+
+        plugin_code = _OPENCODE_PLUGIN_TEMPLATE.format(python_bin=_gate_python())
+
+        if plugin_path.exists():
+            results.append("hook: plugin already installed (overwritten)")
+        else:
+            results.append("hook: installed policy gate plugin")
+        plugin_path.write_text(plugin_code)
+        results.append(f"hook: wrote {plugin_path}")
 
     # 3. Forensic discipline instructions
     results.append(_install_discipline("opencode", project_dir, scope))
@@ -593,6 +628,7 @@ def install_pi(
     scope: str = "user",
     transport: str = "http",
     gateway_config: str = "",
+    with_hook: bool = True,
 ) -> list[str]:
     """Install MCP config + TypeScript extension for Pi.
 
@@ -638,15 +674,18 @@ def install_pi(
     results.append(f"mcp: wrote {mcp_path}")
 
     # 2. TypeScript extension
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    ext_path = hooks_dir / "sift-policy-gate.ts"
-    ext_code = _PI_EXTENSION_TEMPLATE.format(python_bin=sys.executable)
-
-    if ext_path.exists():
-        results.append("hook: extension already installed (overwritten)")
+    if not with_hook:
+        results.append("hook: skipped (--no-hook)")
     else:
-        results.append(f"hook: installed extension at {ext_path}")
-    ext_path.write_text(ext_code)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        ext_path = hooks_dir / "sift-policy-gate.ts"
+        ext_code = _PI_EXTENSION_TEMPLATE.format(python_bin=_gate_python())
+
+        if ext_path.exists():
+            results.append("hook: extension already installed (overwritten)")
+        else:
+            results.append(f"hook: installed extension at {ext_path}")
+        ext_path.write_text(ext_code)
 
     # 3. Forensic discipline instructions
     results.append(_install_discipline("pi", project_dir, scope))
@@ -723,7 +762,9 @@ def interactive_menu(detected: list[HarnessInfo]) -> list[str]:
 # ──────────────────────────── verify ──────────────────────────────────────────
 
 
-def verify_installation(harness_id: str, project_dir: str, scope: str = "user") -> list[str]:
+def verify_installation(
+    harness_id: str, project_dir: str, scope: str = "user", with_hook: bool = True
+) -> list[str]:
     """Post-install verification checks (scope-aware)."""
     issues = []
     p = Path(project_dir)
@@ -746,14 +787,14 @@ def verify_installation(harness_id: str, project_dir: str, scope: str = "user") 
         if not (cfg_dir / "opencode.jsonc").exists() and not (cfg_dir / "opencode.json").exists():
             issues.append(f"missing opencode.json(c) in {cfg_dir}")
         plugin_dir = cfg_dir / "plugins" if scope == "user" else p / ".opencode" / "plugins"
-        if not (plugin_dir / "sift-policy-gate.ts").exists():
+        if with_hook and not (plugin_dir / "sift-policy-gate.ts").exists():
             issues.append(f"missing plugin: {plugin_dir / 'sift-policy-gate.ts'}")
 
     elif harness_id == "pi":
         if scope == "user":
             if not (home / ".pi" / ".mcp.json").exists():
                 issues.append("missing ~/.pi/.mcp.json")
-            if not (home / ".pi" / "hooks" / "sift-policy-gate.ts").exists():
+            if with_hook and not (home / ".pi" / "hooks" / "sift-policy-gate.ts").exists():
                 issues.append("missing ~/.pi/hooks/sift-policy-gate.ts")
         else:
             if not (p / ".mcp.json").exists():
@@ -839,6 +880,13 @@ examples:
         action="store_const",
         const="project",
         help="Alias for --scope project (this directory only).",
+    )
+    parser.add_argument(
+        "--no-hook",
+        action="store_true",
+        help="Install MCP/agents/discipline only — skip the Layer 0 policy "
+             "gate hook (for client machines; enforcement stays on the "
+             "gateway host).",
     )
     parser.add_argument(
         "--transport",
@@ -932,11 +980,14 @@ examples:
         print(f"  {_BOLD}{info.name}{_RESET}")
         if hid == "claude-code" and args.transport == "stdio":
             print(f"    MCP transport: stdio (spawned on launch)")
-            print(f"    Gateway cmd:   {sys.executable} -m sift_gateway --stdio")
+            print(f"    Gateway cmd:   {_gate_python()} -m sift_gateway --stdio")
             print(f"    Gateway cfg:   {gateway_config}")
         else:
             print(f"    MCP endpoint:  {args.gateway_url}")
-        print(f"    Policy gate:   OPA → bwrap sandbox wrapping")
+        if args.no_hook:
+            print(f"    Policy gate:   skipped (--no-hook; gateway-side enforcement only)")
+        else:
+            print(f"    Policy gate:   OPA → bwrap sandbox wrapping")
         if hid == "claude-code":
             print(f"    Hook type:     PreToolUse (updatedInput)")
             _subagents = sorted(_SUBAGENTS_SRC.glob("*.md")) if _SUBAGENTS_SRC.is_dir() else []
@@ -978,6 +1029,7 @@ examples:
                 args.scope,
                 args.transport,
                 gateway_config,
+                not args.no_hook,
             )
             for r in results:
                 _ok(r)
@@ -987,7 +1039,7 @@ examples:
             continue
 
         # Verify
-        issues = verify_installation(hid, project, args.scope)
+        issues = verify_installation(hid, project, args.scope, not args.no_hook)
         if issues:
             for issue in issues:
                 _warn(f"verify: {issue}")
