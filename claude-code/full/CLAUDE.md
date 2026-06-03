@@ -35,6 +35,15 @@ terminal with truncated, contextless text.
 
 ---
 
+## SCRATCH SPACE
+
+Use `scratch/` (within the case directory) for intermediate files —
+symbol caches, temp extractions, working copies. Do NOT use /tmp —
+it is outside the sandbox scope and will fail with read-only errors.
+Volatility symbols should be pre-staged at `scratch/symbols/`.
+
+---
+
 ## RULE ONE: NEVER DELETE FILES
 
 Before ANY deletion:
@@ -131,6 +140,19 @@ All findings are DRAFT until approved by the examiner via `vhir approve`.
 - `get_findings`, `get_timeline`, `get_actions` — retrieve case data
 - `add_todo`, `list_todos`, `update_todo`, `complete_todo` — task tracking
 - `list_evidence` — evidence index with integrity status
+
+**Evidence graph (KAG-lite) — use after staging findings:**
+- `evidence_chain` — trace finding → audit → registered evidence (provenance)
+- `cross_reference` — find all nodes connected to an IP, hash, filename, account
+- `temporal_neighbors` — events within N seconds of a timestamp, optionally per-host
+- `corroboration_map` — STRONG/PARTIAL/WEAK scoring per finding or all findings
+- `host_summary` — aggregate findings, events, IOCs, techniques per host
+- `rebuild_evidence_graph` — force rebuild from case files, return graph stats
+
+After staging findings, run `corroboration_map()` to identify weakly-supported
+findings, and `evidence_chain()` on key findings to verify the full provenance
+chain is intact. Use `temporal_neighbors()` to discover cross-host activity
+patterns the linear investigation may have missed.
 
 **Forensic discipline:**
 - `get_investigation_framework` — principles, HITL checkpoints, workflow
@@ -360,6 +382,7 @@ The finding remains DRAFT until the examiner reviews and approves it.
 4. Stop at checkpoints for human approval
 5. Surface findings as you discover them — present evidence, get approval, record; never batch at the end
 6. Log reasoning at decision points — unrecorded analysis is lost to context compaction
+7. After all findings are staged and critic-verified, run `corroboration_map()` and `evidence_chain()` on key findings to assess overall evidence quality
 
 ---
 

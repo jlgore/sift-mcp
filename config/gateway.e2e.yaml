@@ -29,7 +29,8 @@ backends:
     command: "python"
     args: ["-m", "sift_mcp"]
     env:
-      VHIR_CASE_DIR: "/cases/e2e-test"
+      VHIR_CASE_DIR: "${VHIR_CASE_DIR}"
+      VHIR_EXAMINER: "jgore"
     enabled: true
 
   # Case lifecycle + evidence registry (evidence_register, case_status, …).
@@ -41,7 +42,8 @@ backends:
     args: ["-m", "case_mcp"]
     env:
       VHIR_CASES_DIR: "/cases"
-      VHIR_CASE_DIR: "/cases/e2e-test"
+      VHIR_CASE_DIR: "${VHIR_CASE_DIR}"
+      VHIR_EXAMINER: "jgore"
     enabled: true
 
   # Investigation recording (record_finding, record_timeline_event, …) +
@@ -53,7 +55,8 @@ backends:
     args: ["-m", "forensic_mcp", "--deferred-tools"]
     env:
       VHIR_CASES_DIR: "/cases"
-      VHIR_CASE_DIR: "/cases/e2e-test"
+      VHIR_CASE_DIR: "${VHIR_CASE_DIR}"
+      VHIR_EXAMINER: "jgore"
     enabled: true
 
   # Report generation (generate_report, save_report, list_reports). Depends on
@@ -64,5 +67,6 @@ backends:
     args: ["-m", "report_mcp"]
     env:
       VHIR_CASES_DIR: "/cases"
-      VHIR_CASE_DIR: "/cases/e2e-test"
+      VHIR_CASE_DIR: "${VHIR_CASE_DIR}"
+      VHIR_EXAMINER: "jgore"
     enabled: true
