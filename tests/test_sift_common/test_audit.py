@@ -166,6 +166,27 @@ class TestAuditWriter:
         entry = json.loads((case_dir / "audit" / "test-mcp.jsonl").read_text().strip())
         assert entry["case_id"] == "INC-099"
 
+    def test_case_dir_outranks_active_case_pointer(self, tmp_path, monkeypatch):
+        """VHIR_CASE_DIR (process-scoped) must beat ~/.vhir/active_case
+        (global session state) for the case_id label — matching the audit-dir
+        precedence, so entries are labeled with the case they're written into."""
+        case_dir = tmp_path / "e2e-test"
+        case_dir.mkdir()
+        (case_dir / "CASE.yaml").write_text("case_id: e2e-test\ndescription: x\n")
+        other_case = tmp_path / "508-intrusion"
+        other_case.mkdir()
+        home = tmp_path / "home"
+        (home / ".vhir").mkdir(parents=True)
+        (home / ".vhir" / "active_case").write_text(str(other_case))
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("VHIR_CASE_DIR", str(case_dir))
+        monkeypatch.setenv("VHIR_EXAMINER", "tester")
+        monkeypatch.delenv("VHIR_ACTIVE_CASE", raising=False)
+        writer = AuditWriter("test-mcp")
+        writer.log(tool="t", params={}, result_summary="ok")
+        entry = json.loads((case_dir / "audit" / "test-mcp.jsonl").read_text().strip())
+        assert entry["case_id"] == "e2e-test"
+
     def test_elapsed_ms_recorded(self, tmp_path, monkeypatch):
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()

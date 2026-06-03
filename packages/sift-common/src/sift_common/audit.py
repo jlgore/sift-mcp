@@ -252,8 +252,12 @@ class AuditWriter:
             "examiner": self.examiner,
             "case_id": case_id
             or os.environ.get("VHIR_ACTIVE_CASE", "")
-            or self._read_active_case_id()
-            or self._read_case_dir_id(),
+            # VHIR_CASE_DIR (process-scoped, explicit) must outrank the
+            # ~/.vhir/active_case pointer (global, mutable session state) —
+            # matching _get_audit_dir's precedence, so entries are always
+            # labeled with the case whose audit/ they are written into.
+            or self._read_case_dir_id()
+            or self._read_active_case_id(),
             "source": source,
             "params": params,
             "result_summary": _summarize(result_summary),
