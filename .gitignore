@@ -54,3 +54,6 @@ pytest-of-user/
 # Local tool binaries (fetched/built locally, not source)
 /tools/opa
 /bubblewrap-*.tar.xz
+
+# e2e deliverables are evidence, not logs — keep them tracked
+!docs/e2e-evidence/*.jsonl
