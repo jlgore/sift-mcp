@@ -1,0 +1,183 @@
+---
+# Provision a fresh SIFT Workstation VM as a sift-mcp execution target.
+#
+# Tested against sift-2026-04-22.ova (Ubuntu 24.04.4, kernel 6.8,
+# bubblewrap 0.9.0 non-setuid). See docs/sift-vm-setup.md for the manual
+# procedure and the rationale behind each step.
+#
+#   ansible-playbook -i inventory.ini sift-provision.yml
+#
+# Requires the `ansible` package (community.general for lvol,
+# ansible.posix for synchronize), not bare ansible-core.
+
+- name: Provision SIFT VM for sift-mcp
+  hosts: sift
+  vars:
+    sift_user: sansforensics
+    # Controller-side repo checkouts (trailing slash matters for rsync)
+    sift_mcp_src: "{{ lookup('env', 'HOME') }}/git/sift-mcp/"
+    valhuntir_src: "{{ lookup('env', 'HOME') }}/git/Valhuntir/"
+    cases_dir: /cases
+    # Optional: set to create+activate a case, e.g. -e vhir_case_id=508-intrusion
+    # vhir_case_id: ...
+    vhir_examiner: "{{ lookup('env', 'USER') }}"
+
+  tasks:
+    # ── Disk: the OVA ships a ~488 GB disk with only a 100 GB root LV ──────
+    - name: Grow root LV to fill the volume group
+      become: true
+      community.general.lvol:
+        vg: ubuntu-vg
+        lv: ubuntu-lv
+        size: +100%FREE
+        resizefs: true
+        shrink: false
+
+    # ── bwrap userns: Ubuntu 24.04 restricts unprivileged user namespaces ──
+    - name: Install AppArmor profile granting userns to bwrap
+      become: true
+      ansible.builtin.copy:
+        src: apparmor-bwrap
+        dest: /etc/apparmor.d/bwrap
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload bwrap AppArmor profile
+
+    - name: Flush handlers so the profile is active before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify unprivileged bwrap works (userns + netns + RO bind)
+      ansible.builtin.command:
+        cmd: bwrap --ro-bind / / --unshare-net --unshare-user true
+      changed_when: false
+
+    # ── Code: rsync working trees from the controller ──────────────────────
+    - name: Sync sift-mcp repo
+      ansible.posix.synchronize:
+        src: "{{ sift_mcp_src }}"
+        dest: "~/sift-mcp/"
+        rsync_opts:
+          - "--exclude=.venv"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=node_modules"
+
+    - name: Sync Valhuntir repo (vhir-cli — case-mcp/report-mcp dependency)
+      ansible.posix.synchronize:
+        src: "{{ valhuntir_src }}"
+        dest: "~/Valhuntir/"
+        rsync_opts:
+          - "--exclude=.venv"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+
+    # The repo carries a validated OPA build at tools/opa (synced above).
+    # Installing it on PATH satisfies the evaluator's resolution order
+    # (SIFT_OPA_PATH -> PATH -> repo tools/opa) without per-process env.
+    # Note: tools/opa is a local v1.17.0 build, not the official release
+    # binary — to switch to upstream, replace this with a get_url of
+    # https://github.com/open-policy-agent/opa/releases/download/v1.17.0/opa_linux_amd64_static
+    - name: Install OPA to /usr/local/bin
+      become: true
+      ansible.builtin.copy:
+        src: "/home/{{ sift_user }}/sift-mcp/tools/opa"
+        remote_src: true
+        dest: /usr/local/bin/opa
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Verify OPA version
+      ansible.builtin.command:
+        cmd: opa version
+      register: opa_version
+      changed_when: false
+      failed_when: "'Version: 1.17' not in opa_version.stdout"
+
+    # ── Python env: uv + one-shot editable install of all packages ─────────
+    - name: Install uv
+      ansible.builtin.shell:
+        cmd: curl -LsSf https://astral.sh/uv/install.sh | sh
+        creates: "~/.local/bin/uv"
+
+    - name: Create venv
+      ansible.builtin.command:
+        cmd: "~/.local/bin/uv venv .venv --python python3.12"
+        chdir: "~/sift-mcp"
+        creates: "~/sift-mcp/.venv/bin/python"
+
+    # One command so uv resolves sift-common / forensic-knowledge / vhir-cli
+    # from the local trees instead of PyPI.
+    - name: Install packages (editable)
+      ansible.builtin.shell:
+        cmd: >
+          ~/.local/bin/uv pip install --python .venv/bin/python
+          -e ~/Valhuntir
+          -e packages/sift-common
+          -e packages/forensic-knowledge
+          -e packages/sift-mcp
+          -e packages/sift-gateway
+          -e packages/case-mcp
+          -e packages/forensic-mcp
+          -e packages/report-mcp
+          pytest pytest-asyncio
+        chdir: "~/sift-mcp"
+      register: pip_install
+      changed_when: "'Installed' in pip_install.stdout or '+' in pip_install.stdout"
+
+    - name: Smoke-test imports
+      ansible.builtin.command:
+        cmd: >
+          ~/sift-mcp/.venv/bin/python -c
+          "import sift_mcp, sift_gateway, case_mcp, forensic_mcp, report_mcp, vhir_cli"
+      changed_when: false
+
+    # ── Case scaffolding ────────────────────────────────────────────────────
+    - name: Create cases root
+      become: true
+      ansible.builtin.file:
+        path: "{{ cases_dir }}"
+        state: directory
+        owner: "{{ sift_user }}"
+        group: root
+        mode: "0775"
+
+    - name: Init case (optional — pass -e vhir_case_id=…)
+      when: vhir_case_id is defined
+      environment:
+        VHIR_CASES_DIR: "{{ cases_dir }}"
+        VHIR_EXAMINER: "{{ vhir_examiner }}"
+      ansible.builtin.shell:
+        cmd: >
+          ~/sift-mcp/.venv/bin/vhir case init {{ vhir_case_id }}
+          --case-id {{ vhir_case_id }}
+          && ~/sift-mcp/.venv/bin/vhir case activate {{ vhir_case_id }}
+        creates: "{{ cases_dir }}/{{ vhir_case_id }}/CASE.yaml"
+
+    # ── Verification: Layer 1 (OPA) and Layer 2 (bwrap) probes ─────────────
+    - name: Run Layer 1 policy probe
+      when: vhir_case_id is defined
+      environment:
+        VHIR_CASE_DIR: "{{ cases_dir }}/{{ vhir_case_id }}"
+        SIFT_POLICY_ENGINE: "1"
+      ansible.builtin.command:
+        cmd: "~/sift-mcp/.venv/bin/python tools/e2e_policy_probe.py"
+        chdir: "~/sift-mcp"
+      changed_when: false
+
+    - name: Run Layer 2 sandbox probe
+      when: vhir_case_id is defined
+      environment:
+        VHIR_CASE_DIR: "{{ cases_dir }}/{{ vhir_case_id }}"
+        SIFT_SANDBOX: "1"
+      ansible.builtin.command:
+        cmd: "~/sift-mcp/.venv/bin/python tools/e2e_sandbox_probe.py"
+        chdir: "~/sift-mcp"
+      changed_when: false
+
+  handlers:
+    - name: Reload bwrap AppArmor profile
+      become: true
+      ansible.builtin.command:
+        cmd: apparmor_parser -r /etc/apparmor.d/bwrap
