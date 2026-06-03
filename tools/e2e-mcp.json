@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sift-gw": {
+      "type": "http",
+      "url": "http://192.168.8.129:4508/mcp"
+    }
+  }
+}
