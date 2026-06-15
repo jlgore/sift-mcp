@@ -1,0 +1,23 @@
+# Keep the Docker build context small and free of host-only / enforcement
+# artifacts. CI builds from a clean checkout (these are mostly belt-and-braces
+# for local `docker build` runs from a dirty working tree).
+.git
+.github
+**/.venv
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Enforcement-layer / agentcontainers artifacts that may linger untracked
+# locally — never belong in the gateway image.
+tools/opa
+*.tar.xz
+docs/SPEC-agentcontainers-*.md
+
+# Editor / OS noise
+*.swp
+.DS_Store
+node_modules
