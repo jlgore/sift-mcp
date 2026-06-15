@@ -2,6 +2,7 @@
 
 import pytest
 from sift_mcp.catalog import clear_catalog_cache
+from sift_mcp.manifest import clear_manifest_cache, load_manifest
 from sift_mcp.tools.discovery import (
     ARTIFACT_ALIASES,
     check_tools,
@@ -14,8 +15,10 @@ from sift_mcp.tools.discovery import (
 @pytest.fixture(autouse=True)
 def clear_cache():
     clear_catalog_cache()
+    clear_manifest_cache()
     yield
     clear_catalog_cache()
+    clear_manifest_cache()
 
 
 class TestListTools:
@@ -35,6 +38,61 @@ class TestListTools:
         for t in tools:
             assert "available" in t
             assert isinstance(t["available"], bool)
+
+    def test_catalog_entries_carry_scope_and_command(self):
+        for t in list_available_tools():
+            assert t["enriched"] is True
+            assert t["command"]
+            assert t["analysis_scope"] in {"offline", "network_offline", "live_network"}
+
+
+class TestSiftManifest:
+    def test_manifest_loads(self):
+        manifest = load_manifest()
+        assert len(manifest) > 100  # full SIFT install is large
+        keys = set(manifest[0])
+        assert {"command", "package", "install_source", "analysis_scope"} <= keys
+
+    def test_no_denied_binaries_in_manifest(self):
+        cmds = {m["command"] for m in load_manifest()}
+        assert {"nc", "env", "kill", "shutdown"}.isdisjoint(cmds)
+
+
+class TestIncludeUncataloged:
+    def test_off_by_default(self):
+        tools = list_available_tools()
+        assert all(t["enriched"] for t in tools)
+        assert all(t["category"] != "uncataloged" for t in tools)
+
+    def test_include_uncataloged_adds_long_tail(self):
+        base = list_available_tools()
+        full = list_available_tools(include_uncataloged=True)
+        assert len(full) > len(base)
+        cmds = {t["command"] for t in full}
+        # a libyal CLI tool that is in the manifest but not the curated catalog
+        assert "esedbexport" in cmds
+        assert any(not t["enriched"] for t in full)
+
+    def test_no_catalog_duplicates(self):
+        full = list_available_tools(include_uncataloged=True)
+        cmds = [t["command"].lower() for t in full]
+        assert len(cmds) == len(set(cmds))
+
+    def test_live_network_excluded_by_default(self):
+        full = list_available_tools(include_uncataloged=True)
+        assert all(t["analysis_scope"] != "live_network" for t in full)
+
+    def test_live_network_opt_in(self):
+        full = list_available_tools(include_uncataloged=True, include_live_network=True)
+        scopes = {t["analysis_scope"] for t in full}
+        assert "live_network" in scopes
+
+    def test_uncataloged_entry_shape(self):
+        full = list_available_tools(include_uncataloged=True)
+        unc = next(t for t in full if not t["enriched"])
+        assert unc["fk_tool"] is None
+        assert "available" in unc
+        assert "install_source" in unc
 
 
 class TestGetToolHelp:
