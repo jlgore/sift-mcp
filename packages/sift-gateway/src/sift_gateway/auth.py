@@ -7,6 +7,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+# Env-based identity resolver (VHIR_EXAMINER > VHIR_ANALYST > OS user). Aliased
+# to avoid colliding with this module's request-based resolve_examiner().
+from sift_common.audit import resolve_examiner as resolve_env_examiner
+
 logger = logging.getLogger(__name__)
 
 # Paths exempt from authentication.
@@ -65,9 +69,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.role = None
             return await call_next(request)
 
-        # If no api_keys configured, auth is disabled (single-user mode)
+        # If no api_keys configured, auth is disabled (single-user mode). Default
+        # the examiner to the configured identity (VHIR_EXAMINER) so findings are
+        # attributed consistently with the audit trail, not hardcoded "anonymous".
         if not self.api_keys:
-            request.state.examiner = "anonymous"
+            request.state.examiner = resolve_env_examiner()
             request.state.role = "examiner"
             return await call_next(request)
 
