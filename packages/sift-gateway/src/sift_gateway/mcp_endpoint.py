@@ -30,6 +30,7 @@ from sift_common.instructions import (
     SIFT_MCP,
     WINDOWS_TRIAGE,
 )
+from sift_common.audit import resolve_examiner
 from sift_common.instructions import GATEWAY as _GATEWAY_INSTRUCTIONS
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -137,8 +138,10 @@ class MCPAuthASGIApp:
             return
 
         if not self.api_keys:
-            # No keys configured — single-user / anonymous mode
-            scope["state"]["examiner"] = "anonymous"
+            # No keys configured — single-user mode. Default the examiner to the
+            # configured identity (VHIR_EXAMINER) so findings are attributed
+            # consistently with the audit trail, not hardcoded "anonymous".
+            scope["state"]["examiner"] = resolve_examiner()
             scope["state"]["role"] = "examiner"
             await self.session_manager.handle_request(scope, receive, send)
             return
